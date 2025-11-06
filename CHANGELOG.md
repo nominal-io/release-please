@@ -4,6 +4,14 @@
 
 [1]: https://www.npmjs.com/package/release-please?activeTab=versions
 
+## [18.0.1](https://github.com/nominal-io/release-please/compare/v18.0.0...v18.0.1) (2025-11-06)
+
+
+### Bug Fixes
+
+* automate with push tags ([4359c0a](https://github.com/nominal-io/release-please/commit/4359c0ae1d705f1ec865f3523acf2b46d2bf1d91))
+* wrong org setup here ([228f88c](https://github.com/nominal-io/release-please/commit/228f88cac884cf8e7b70c84bdc7e41f05fdcc700))
+
 ## [18.0.0](https://github.com/nominal-io/release-please/compare/v17.1.3...v18.0.0) (2025-11-06)
 
 
