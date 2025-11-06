@@ -4,6 +4,13 @@
 
 [1]: https://www.npmjs.com/package/release-please?activeTab=versions
 
+## [18.0.2](https://github.com/nominal-io/release-please/compare/v18.0.1...v18.0.2) (2025-11-06)
+
+
+### Bug Fixes
+
+* change to default github token ([709e6ff](https://github.com/nominal-io/release-please/commit/709e6ff5e61635a649bef1eebcb36078ba061883))
+
 ## [18.0.1](https://github.com/nominal-io/release-please/compare/v18.0.0...v18.0.1) (2025-11-06)
 
 
