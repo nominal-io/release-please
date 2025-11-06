@@ -1,5 +1,5 @@
 {
-  "name": "@nominal/release-please",
+  "name": "@nominal-io/release-please",
   "version": "18.0.0",
   "description": "generate release PRs based on the conventionalcommits.org spec",
   "main": "./build/src/index.js",
@@ -21,7 +21,7 @@
     "!build/src/**/*.map",
     "schemas"
   ],
-  "repository": "nominal/release-please",
+  "repository": "nominal-io/release-please",
   "publishConfig": {
     "registry": "https://npm.pkg.github.com"
   },
@@ -32,9 +32,9 @@
   "author": "Google Inc.",
   "license": "Apache-2.0",
   "bugs": {
-    "url": "https://github.com/nominal/release-please/issues"
+    "url": "https://github.com/nominal-io/release-please/issues"
   },
-  "homepage": "https://github.com/nominal/release-please#readme",
+  "homepage": "https://github.com/nominal-io/release-please#readme",
   "config": {
     "snap-shot-it": {
       "sortSnapshots": true
