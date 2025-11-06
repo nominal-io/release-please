@@ -104,11 +104,25 @@ export class Merge extends ManifestPlugin {
     }
     const updates = mergeUpdates(rawUpdates);
 
+    // Use rootRelease version if available, otherwise fall back to the first candidate's version
+    // only if there's no rootRelease AND all candidates have the same version (linked-versions case)
+    let version = rootRelease?.pullRequest.title.version;
+    if (!version && inScopeCandidates.length > 0) {
+      const firstVersion = inScopeCandidates[0]?.pullRequest.version;
+      const allSameVersion = inScopeCandidates.every(
+        candidate =>
+          candidate.pullRequest.version?.toString() === firstVersion?.toString()
+      );
+      if (allSameVersion) {
+        version = firstVersion;
+      }
+    }
+
     const pullRequest = {
       title: PullRequestTitle.ofComponentTargetBranchVersion(
         rootRelease?.pullRequest.title.component,
         this.targetBranch,
-        rootRelease?.pullRequest.title.version,
+        version,
         this.pullRequestTitlePattern,
         this.componentNoSpace
       ),
