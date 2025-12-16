@@ -19,7 +19,7 @@ jobs:
         with:
           application_id: ${{secrets.NOMBOT_APP_ID}}
           application_private_key: ${{secrets.NOMBOT_PRIVATE_KEY}}
-          permissions: "actions:write, packages:write contents:write pull_requests:write"
+          permissions: "actions:write, packages:write, contents:write, pull_requests:write"
           organization: "nominal-io"
       - uses: actions/setup-node@v3
         with:
