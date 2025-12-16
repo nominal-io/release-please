@@ -4,6 +4,13 @@
 
 [1]: https://www.npmjs.com/package/release-please?activeTab=versions
 
+## [18.1.0](https://github.com/nominal-io/release-please/compare/v18.0.2...v18.1.0) (2025-12-16)
+
+
+### Features
+
+* Add additional-paths config to specify dependencies outside of package ([#5](https://github.com/nominal-io/release-please/issues/5)) ([760afee](https://github.com/nominal-io/release-please/commit/760afee59850ff5223dfeb506acd04a9374e1396))
+
 ## [18.0.2](https://github.com/nominal-io/release-please/compare/v18.0.1...v18.0.2) (2025-11-06)
 
 
