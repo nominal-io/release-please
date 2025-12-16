@@ -4,6 +4,13 @@
 
 [1]: https://www.npmjs.com/package/release-please?activeTab=versions
 
+## [18.1.1](https://github.com/nominal-io/release-please/compare/v18.1.0...v18.1.1) (2025-12-16)
+
+
+### Bug Fixes
+
+* adjust publish workflow ([#7](https://github.com/nominal-io/release-please/issues/7)) ([ff8d3fa](https://github.com/nominal-io/release-please/commit/ff8d3faed6fa8cb54a189cf099a8d0496d5765fa))
+
 ## [18.1.0](https://github.com/nominal-io/release-please/compare/v18.0.2...v18.1.0) (2025-12-16)
 
 
