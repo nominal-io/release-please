@@ -13,14 +13,6 @@ jobs:
         node: [18, 20]
     steps:
       - uses: actions/checkout@v4
-      - name: Get Token
-        id: get_actions_token
-        uses: nominal-io/workflow-application-token-action@86d05551fa394b4b813e0deee328005b45cf5237 # v4.0.1
-        with:
-          application_id: ${{secrets.NOMBOT_APP_ID}}
-          application_private_key: ${{secrets.NOMBOT_PRIVATE_KEY}}
-          permissions: "actions:write, packages:write, contents:write, pull_requests:write"
-          organization: "nominal-io"
       - uses: actions/setup-node@v3
         with:
           node-version: ${{ matrix.node }}
