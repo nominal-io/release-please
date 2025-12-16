@@ -13,6 +13,15 @@ jobs:
   release-please:
     runs-on: ubuntu-latest
     steps:
-      - uses: googleapis/release-please-action@7987652d64b4581673a76e33ad5e98e3dd56832f # v4.1.3
+      - name: Get Token
+        id: get_actions_token
+        uses: nominal-io/workflow-application-token-action@86d05551fa394b4b813e0deee328005b45cf5237 # v4.0.1
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          application_id: ${{secrets.NOMBOT_APP_ID}}
+          application_private_key: ${{secrets.NOMBOT_PRIVATE_KEY}}
+          permissions: "actions:write, packages:write, contents:write, pull_requests:write"
+          organization: "nominal-io"
+
+      - uses: nominal-io/release-please-action@main
+        with:
+          token: ${{ steps.get_actions_token.outputs.token }}
