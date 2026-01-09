@@ -34,7 +34,6 @@ const MAX_SLEEP_SECONDS = 20;
 export const GH_API_URL = 'https://api.github.com';
 export const GH_GRAPHQL_URL = 'https://api.github.com';
 
-// Create Octokit with retry and throttling plugins for resilient API calls
 const OctokitWithPlugins = Octokit.plugin(retry, throttling);
 type OctokitType = InstanceType<typeof OctokitWithPlugins>;
 
@@ -265,28 +264,22 @@ export class GitHub {
           agent: this.createDefaultAgent(apiUrl, options.proxy),
           fetch: options.fetch,
         },
-        // Retry plugin configuration: extends default doNotRetry list
-        // Default: [400, 401, 403, 404, 422, 451]
-        // Added: 409 (Conflict), 410 (Gone) - these are permanent conditions
         retry: {
           doNotRetry: [400, 401, 403, 404, 409, 410, 422, 451],
         },
-        // Throttling plugin configuration: handles rate limits gracefully
         throttle: {
           onRateLimit: (retryAfter, options, _octokit, retryCount) => {
             logger.warn(
-              `Rate limit hit for ${options.method} ${
-                options.url
-              }, retrying after ${retryAfter}s (attempt ${retryCount + 1})`
+              `Rate limit hit for ${options.method} ${options.url}, ` +
+                `retrying after ${retryAfter}s (attempt ${retryCount + 1})`
             );
-            // Retry up to 3 times
             return retryCount < 3;
           },
           onSecondaryRateLimit: (retryAfter, options, _octokit, retryCount) => {
             logger.warn(
-              `Secondary rate limit hit for ${options.method} ${options.url}, retrying after ${retryAfter}s`
+              `Secondary rate limit hit for ${options.method} ${options.url}, ` +
+                `retrying after ${retryAfter}s`
             );
-            // Retry once on secondary rate limit
             return retryCount < 1;
           },
         },
@@ -1729,9 +1722,7 @@ function normalizePrefix(prefix: string) {
 }
 
 /**
- * Wrap an async method with error handling.
- * Captures the calling context stack trace to preserve it through
- * async plugin layers (retry/throttling plugins).
+ * Wrap an async method with error handling
  *
  * @param fn Async function that can throw Errors
  * @param errorHandler An optional error handler for rethrowing custom exceptions
@@ -1742,25 +1733,20 @@ const wrapAsync = <T extends Array<any>, V>(
   errorHandler?: (e: Error) => void
 ) => {
   return async (...args: T): Promise<V> => {
-    // Capture the calling context stack trace before async operations.
-    // This preserves the caller info through async plugin layers.
     const callerStack = new Error().stack;
+    const appendCallerStack = (error: Error) => {
+      if (callerStack && error.stack) {
+        error.stack += '\n' + callerStack.split('\n').slice(1).join('\n');
+      }
+    };
+
     try {
       return await fn(...args);
     } catch (e) {
-      // Helper to append caller stack to error for debugging
-      const appendCallerStack = (error: Error) => {
-        if (callerStack && error.stack) {
-          error.stack =
-            error.stack + '\n' + callerStack.split('\n').slice(1).join('\n');
-        }
-      };
-
       if (errorHandler) {
         try {
           errorHandler(e as GitHubAPIError);
         } catch (handlerError) {
-          // Preserve caller stack on custom errors (e.g., DuplicateReleaseError)
           appendCallerStack(handlerError as Error);
           throw handlerError;
         }

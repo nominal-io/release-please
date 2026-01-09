@@ -894,6 +894,24 @@ describe('GitHub', () => {
       }
       expect(thrown).to.be.true;
     });
+
+    it('retries on 503 and succeeds', async () => {
+      const createCommentResponse = JSON.parse(
+        readFileSync(
+          resolve(fixturesPath, 'create-comment-response.json'),
+          'utf8'
+        )
+      );
+      req
+        .post('/repos/fake/fake/issues/1347/comments')
+        .reply(503, 'Service Unavailable')
+        .post('/repos/fake/fake/issues/1347/comments')
+        .reply(201, createCommentResponse);
+      const url = await github.commentOnIssue('This is a comment', 1347);
+      expect(url).to.eql(
+        'https://github.com/fake/fake/issues/1347#issuecomment-1'
+      );
+    });
   });
 
   describe('generateReleaseNotes', () => {
