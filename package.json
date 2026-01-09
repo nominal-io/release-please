@@ -1,6 +1,6 @@
 {
   "name": "@nominal-io/release-please",
-  "version": "18.1.1",
+  "version": "18.2.0",
   "description": "generate release PRs based on the conventionalcommits.org spec",
   "main": "./build/src/index.js",
   "bin": "./build/src/bin/release-please.js",

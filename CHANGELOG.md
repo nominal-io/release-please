@@ -4,6 +4,13 @@
 
 [1]: https://www.npmjs.com/package/release-please?activeTab=versions
 
+## [18.2.0](https://github.com/nominal-io/release-please/compare/v18.1.1...v18.2.0) (2026-01-09)
+
+
+### Features
+
+* add Octokit retry and throttling plugins for resilient API calls ([#11](https://github.com/nominal-io/release-please/issues/11)) ([017f56f](https://github.com/nominal-io/release-please/commit/017f56f56cc53d8ee566487491b523e7d2e126be))
+
 ## [18.1.1](https://github.com/nominal-io/release-please/compare/v18.1.0...v18.1.1) (2025-12-16)
 
 
