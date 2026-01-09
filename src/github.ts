@@ -265,18 +265,15 @@ export class GitHub {
           agent: this.createDefaultAgent(apiUrl, options.proxy),
           fetch: options.fetch,
         },
-        // Retry plugin configuration: retries on 5xx errors and network failures
+        // Retry plugin configuration: extends default doNotRetry list
+        // Default: [400, 401, 403, 404, 422, 451]
+        // Added: 409 (Conflict), 410 (Gone) - these are permanent conditions
         retry: {
-          doNotRetry: ['400', '401', '403', '404', '422'],
+          doNotRetry: [400, 401, 403, 404, 409, 410, 422, 451],
         },
         // Throttling plugin configuration: handles rate limits gracefully
         throttle: {
-          onRateLimit: (
-            retryAfter: number,
-            options: {method: string; url: string},
-            _octokit: Octokit,
-            retryCount: number
-          ) => {
+          onRateLimit: (retryAfter, options, _octokit, retryCount) => {
             logger.warn(
               `Rate limit hit for ${options.method} ${
                 options.url
@@ -285,12 +282,7 @@ export class GitHub {
             // Retry up to 3 times
             return retryCount < 3;
           },
-          onSecondaryRateLimit: (
-            retryAfter: number,
-            options: {method: string; url: string},
-            _octokit: Octokit,
-            retryCount: number
-          ) => {
+          onSecondaryRateLimit: (retryAfter, options, _octokit, retryCount) => {
             logger.warn(
               `Secondary rate limit hit for ${options.method} ${options.url}, retrying after ${retryAfter}s`
             );
@@ -1737,7 +1729,9 @@ function normalizePrefix(prefix: string) {
 }
 
 /**
- * Wrap an async method with error handling
+ * Wrap an async method with error handling.
+ * Captures the calling context stack trace to preserve it through
+ * async plugin layers (retry/throttling plugins).
  *
  * @param fn Async function that can throw Errors
  * @param errorHandler An optional error handler for rethrowing custom exceptions
@@ -1748,14 +1742,33 @@ const wrapAsync = <T extends Array<any>, V>(
   errorHandler?: (e: Error) => void
 ) => {
   return async (...args: T): Promise<V> => {
+    // Capture the calling context stack trace before async operations.
+    // This preserves the caller info through async plugin layers.
+    const callerStack = new Error().stack;
     try {
       return await fn(...args);
     } catch (e) {
+      // Helper to append caller stack to error for debugging
+      const appendCallerStack = (error: Error) => {
+        if (callerStack && error.stack) {
+          error.stack =
+            error.stack + '\n' + callerStack.split('\n').slice(1).join('\n');
+        }
+      };
+
       if (errorHandler) {
-        errorHandler(e as GitHubAPIError);
+        try {
+          errorHandler(e as GitHubAPIError);
+        } catch (handlerError) {
+          // Preserve caller stack on custom errors (e.g., DuplicateReleaseError)
+          appendCallerStack(handlerError as Error);
+          throw handlerError;
+        }
       }
       if (e instanceof RequestError) {
-        throw new GitHubAPIError(e);
+        const error = new GitHubAPIError(e);
+        appendCallerStack(error);
+        throw error;
       }
       throw e;
     }
