@@ -17,6 +17,8 @@ import {PullRequest} from './pull-request';
 import {Commit} from './commit';
 
 import {Octokit} from '@octokit/rest';
+import {retry} from '@octokit/plugin-retry';
+import {throttling} from '@octokit/plugin-throttling';
 import {request} from '@octokit/request';
 import {graphql} from '@octokit/graphql';
 import {RequestError} from '@octokit/request-error';
@@ -31,7 +33,9 @@ const MAX_ISSUE_BODY_SIZE = 65536;
 const MAX_SLEEP_SECONDS = 20;
 export const GH_API_URL = 'https://api.github.com';
 export const GH_GRAPHQL_URL = 'https://api.github.com';
-type OctokitType = InstanceType<typeof Octokit>;
+
+const OctokitWithPlugins = Octokit.plugin(retry, throttling);
+type OctokitType = InstanceType<typeof OctokitWithPlugins>;
 
 import {logger as defaultLogger} from './util/logger';
 import {Repository} from './repository';
@@ -251,13 +255,33 @@ export class GitHub {
     const apiUrl = options.apiUrl ?? GH_API_URL;
     const graphqlUrl = options.graphqlUrl ?? GH_GRAPHQL_URL;
     const releasePleaseVersion = require('../../package.json').version;
+    const logger = options.logger ?? defaultLogger;
     const apis = options.octokitAPIs ?? {
-      octokit: new Octokit({
+      octokit: new OctokitWithPlugins({
         baseUrl: apiUrl,
         auth: options.token,
         request: {
           agent: this.createDefaultAgent(apiUrl, options.proxy),
           fetch: options.fetch,
+        },
+        retry: {
+          doNotRetry: [400, 401, 403, 404, 409, 410, 422, 451],
+        },
+        throttle: {
+          onRateLimit: (retryAfter, options, _octokit, retryCount) => {
+            logger.warn(
+              `Rate limit hit for ${options.method} ${options.url}, ` +
+                `retrying after ${retryAfter}s (attempt ${retryCount + 1})`
+            );
+            return retryCount < 3;
+          },
+          onSecondaryRateLimit: (retryAfter, options, _octokit, retryCount) => {
+            logger.warn(
+              `Secondary rate limit hit for ${options.method} ${options.url}, ` +
+                `retrying after ${retryAfter}s`
+            );
+            return retryCount < 1;
+          },
         },
       }),
       request: request.defaults({
@@ -1709,14 +1733,28 @@ const wrapAsync = <T extends Array<any>, V>(
   errorHandler?: (e: Error) => void
 ) => {
   return async (...args: T): Promise<V> => {
+    const callerStack = new Error().stack;
+    const appendCallerStack = (error: Error) => {
+      if (callerStack && error.stack) {
+        error.stack += '\n' + callerStack.split('\n').slice(1).join('\n');
+      }
+    };
+
     try {
       return await fn(...args);
     } catch (e) {
       if (errorHandler) {
-        errorHandler(e as GitHubAPIError);
+        try {
+          errorHandler(e as GitHubAPIError);
+        } catch (handlerError) {
+          appendCallerStack(handlerError as Error);
+          throw handlerError;
+        }
       }
       if (e instanceof RequestError) {
-        throw new GitHubAPIError(e);
+        const error = new GitHubAPIError(e);
+        appendCallerStack(error);
+        throw error;
       }
       throw e;
     }
