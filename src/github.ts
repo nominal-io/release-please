@@ -17,6 +17,8 @@ import {PullRequest} from './pull-request';
 import {Commit} from './commit';
 
 import {Octokit} from '@octokit/rest';
+import {retry} from '@octokit/plugin-retry';
+import {throttling} from '@octokit/plugin-throttling';
 import {request} from '@octokit/request';
 import {graphql} from '@octokit/graphql';
 import {RequestError} from '@octokit/request-error';
@@ -31,7 +33,10 @@ const MAX_ISSUE_BODY_SIZE = 65536;
 const MAX_SLEEP_SECONDS = 20;
 export const GH_API_URL = 'https://api.github.com';
 export const GH_GRAPHQL_URL = 'https://api.github.com';
-type OctokitType = InstanceType<typeof Octokit>;
+
+// Create Octokit with retry and throttling plugins for resilient API calls
+const OctokitWithPlugins = Octokit.plugin(retry, throttling);
+type OctokitType = InstanceType<typeof OctokitWithPlugins>;
 
 import {logger as defaultLogger} from './util/logger';
 import {Repository} from './repository';
@@ -251,13 +256,47 @@ export class GitHub {
     const apiUrl = options.apiUrl ?? GH_API_URL;
     const graphqlUrl = options.graphqlUrl ?? GH_GRAPHQL_URL;
     const releasePleaseVersion = require('../../package.json').version;
+    const logger = options.logger ?? defaultLogger;
     const apis = options.octokitAPIs ?? {
-      octokit: new Octokit({
+      octokit: new OctokitWithPlugins({
         baseUrl: apiUrl,
         auth: options.token,
         request: {
           agent: this.createDefaultAgent(apiUrl, options.proxy),
           fetch: options.fetch,
+        },
+        // Retry plugin configuration: retries on 5xx errors and network failures
+        retry: {
+          doNotRetry: ['400', '401', '403', '404', '422'],
+        },
+        // Throttling plugin configuration: handles rate limits gracefully
+        throttle: {
+          onRateLimit: (
+            retryAfter: number,
+            options: {method: string; url: string},
+            _octokit: Octokit,
+            retryCount: number
+          ) => {
+            logger.warn(
+              `Rate limit hit for ${options.method} ${
+                options.url
+              }, retrying after ${retryAfter}s (attempt ${retryCount + 1})`
+            );
+            // Retry up to 3 times
+            return retryCount < 3;
+          },
+          onSecondaryRateLimit: (
+            retryAfter: number,
+            options: {method: string; url: string},
+            _octokit: Octokit,
+            retryCount: number
+          ) => {
+            logger.warn(
+              `Secondary rate limit hit for ${options.method} ${options.url}, retrying after ${retryAfter}s`
+            );
+            // Retry once on secondary rate limit
+            return retryCount < 1;
+          },
         },
       }),
       request: request.defaults({
