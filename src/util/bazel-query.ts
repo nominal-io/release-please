@@ -144,7 +144,7 @@ export function runBazelQuery(
   excludePath?: string,
   logger?: Logger
 ): string[] {
-  logger?.info(`Running bazel deps query: bazel query '${queryExpression}'`);
+  logger?.debug(`Running bazel deps query: bazel query '${queryExpression}'`);
 
   try {
     const output = execFileSync('bazel', ['query', queryExpression], {
@@ -154,7 +154,7 @@ export function runBazelQuery(
     });
 
     const paths = parseBazelQueryOutput(output, excludePath);
-    logger?.info(
+    logger?.debug(
       `Bazel deps query resolved ${
         paths.length
       } additional paths: ${JSON.stringify(paths)}`
