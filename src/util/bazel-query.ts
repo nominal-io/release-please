@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {execSync} from 'child_process';
+import {execFileSync} from 'child_process';
 import {Logger} from './logger';
 
 /**
@@ -78,22 +78,76 @@ export function parseBazelQueryOutput(
 }
 
 /**
- * Execute a bazel query command and return the parsed local package paths.
+ * Build the default bazel query expression for a given package path.
  *
- * @param query The bazel query string to execute (e.g., "bazel query 'deps(//combined-service)'")
+ * @param packagePath The package path (e.g., "apps/my-app")
+ * @returns The bazel query expression (passed to `bazel query`)
+ */
+export function buildBazelQueryExpression(packagePath: string): string {
+  return `deps(//${packagePath})`;
+}
+
+/**
+ * Resolve the bazel query expression from the config value.
+ *
+ * - If the config value is `true`, build the default expression from the package path.
+ * - If the config value is a string:
+ *    - If it starts with `bazel query`, treat it as a full command and extract the query expression
+ *    - Otherwise, treat it as a query expression directly
+ *
+ * @param configValue The `bazel-deps-query` config value (boolean or string)
+ * @param packagePath The package path from the config key
+ * @returns The resolved bazel query expression
+ */
+export function resolveBazelQuery(
+  configValue: boolean | string,
+  packagePath: string
+): string {
+  if (configValue === true) {
+    return buildBazelQueryExpression(packagePath);
+  }
+
+  // A boolean `false` behaves like "disabled".
+  if (configValue === false) {
+    return '';
+  }
+
+  const trimmed = configValue.trim();
+  const bazelQueryPrefix = /^bazel\s+query\s+/;
+  if (bazelQueryPrefix.test(trimmed)) {
+    let expr = trimmed.replace(bazelQueryPrefix, '').trim();
+    // If the expression is quoted, strip surrounding quotes.
+    if (
+      (expr.startsWith('"') && expr.endsWith('"')) ||
+      (expr.startsWith("'") && expr.endsWith("'"))
+    ) {
+      expr = expr.slice(1, -1);
+    }
+    return expr;
+  }
+
+  return trimmed;
+}
+
+/**
+ * Execute a bazel query expression and return the parsed local package paths.
+ *
+ * This uses `execFileSync` (no shell) to reduce the risk of command injection.
+ *
+ * @param queryExpression The query expression to execute (e.g., "deps(//combined-service)")
  * @param excludePath Optional path to exclude from results
  * @param logger Optional logger instance
  * @returns Array of unique local package paths
  */
 export function runBazelQuery(
-  query: string,
+  queryExpression: string,
   excludePath?: string,
   logger?: Logger
 ): string[] {
-  logger?.info(`Running bazel deps query: ${query}`);
+  logger?.info(`Running bazel deps query: bazel query '${queryExpression}'`);
 
   try {
-    const output = execSync(query, {
+    const output = execFileSync('bazel', ['query', queryExpression], {
       encoding: 'utf-8',
       timeout: 120000, // 2 minute timeout
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -109,13 +163,13 @@ export function runBazelQuery(
   } catch (err) {
     const error = err as Error & {stderr?: string};
     logger?.error(
-      `Failed to run bazel deps query "${query}": ${error.message}`
+      `Failed to run bazel deps query "${queryExpression}": ${error.message}`
     );
     if (error.stderr) {
       logger?.error(`stderr: ${error.stderr}`);
     }
     throw new Error(
-      `Failed to execute bazel-deps-query "${query}": ${error.message}`
+      `Failed to execute bazel-deps-query "${queryExpression}": ${error.message}`
     );
   }
 }

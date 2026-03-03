@@ -14,7 +14,10 @@
 
 import {describe, it} from 'mocha';
 import {expect} from 'chai';
-import {parseBazelQueryOutput} from '../../src/util/bazel-query';
+import {
+  parseBazelQueryOutput,
+  resolveBazelQuery,
+} from '../../src/util/bazel-query';
 
 describe('parseBazelQueryOutput', () => {
   it('should parse simple bazel query output', () => {
@@ -118,5 +121,25 @@ describe('parseBazelQueryOutput', () => {
 
     const paths = parseBazelQueryOutput(output, 'apps/my-app/');
     expect(paths).to.deep.equal(['libs/my-lib']);
+  });
+});
+
+describe('resolveBazelQuery', () => {
+  it('should build default query expression when enabled', () => {
+    const expr = resolveBazelQuery(true, 'apps/my-app');
+    expect(expr).to.equal('deps(//apps/my-app)');
+  });
+
+  it('should treat non-prefixed strings as query expressions', () => {
+    const expr = resolveBazelQuery('deps(//combined-service)', 'apps/my-app');
+    expect(expr).to.equal('deps(//combined-service)');
+  });
+
+  it('should extract expression from full bazel query command', () => {
+    const expr = resolveBazelQuery(
+      "bazel query 'deps(//apps/my-app)'",
+      'apps/my-app'
+    );
+    expect(expr).to.equal('deps(//apps/my-app)');
   });
 });

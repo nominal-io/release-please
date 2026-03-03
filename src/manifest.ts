@@ -47,7 +47,7 @@ import {
 } from './util/pull-request-overflow-handler';
 import {signoffCommitMessage} from './util/signoff-commit-message';
 import {CommitExclude} from './util/commit-exclude';
-import {runBazelQuery} from './util/bazel-query';
+import {runBazelQuery, resolveBazelQuery} from './util/bazel-query';
 
 type ExtraGenericFile = {
   type: 'generic';
@@ -141,7 +141,7 @@ export interface ReleaserConfig {
   // Manifest only
   excludePaths?: string[];
   additionalPaths?: string[];
-  bazelDepsQuery?: string;
+  bazelDepsQuery?: boolean | string;
 }
 
 export interface CandidateReleasePullRequest {
@@ -190,7 +190,7 @@ interface ReleaserConfigJson {
   'initial-version'?: string;
   'exclude-paths'?: string[]; // manifest-only
   'additional-paths'?: string[]; // manifest-only
-  'bazel-deps-query'?: string; // manifest-only
+  'bazel-deps-query'?: boolean | string; // manifest-only
   'date-format'?: string;
 }
 
@@ -679,7 +679,8 @@ export class Manifest {
       const staticPaths = config.additionalPaths || [];
       let bazelPaths: string[] = [];
       if (config.bazelDepsQuery) {
-        bazelPaths = runBazelQuery(config.bazelDepsQuery, path, this.logger);
+        const queryExpression = resolveBazelQuery(config.bazelDepsQuery, path);
+        bazelPaths = runBazelQuery(queryExpression, path, this.logger);
       }
       // merge and deduplicate
       const allPaths = [...new Set([...staticPaths, ...bazelPaths])];

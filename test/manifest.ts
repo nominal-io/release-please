@@ -562,7 +562,7 @@ describe('Manifest', () => {
         github.repository.defaultBranch
       );
       expect(manifest.repositoryConfig['apps/my-app'].bazelDepsQuery).to.equal(
-        "bazel query 'deps(//apps/my-app)'"
+        true
       );
     });
     it('should read additional paths from manifest', async () => {
@@ -3838,7 +3838,7 @@ describe('Manifest', () => {
           'apps/my-app': {
             releaseType: 'simple',
             component: 'myapp',
-            bazelDepsQuery: "bazel query 'deps(//apps/my-app)'",
+            bazelDepsQuery: true,
           },
         },
         {
@@ -3856,7 +3856,7 @@ describe('Manifest', () => {
       sinon.assert.calledOnce(runBazelQueryStub);
       sinon.assert.calledWith(
         runBazelQueryStub,
-        "bazel query 'deps(//apps/my-app)'",
+        'deps(//apps/my-app)',
         'apps/my-app'
       );
     });
@@ -3905,7 +3905,7 @@ describe('Manifest', () => {
             releaseType: 'simple',
             component: 'myapp',
             additionalPaths: ['libs/static-lib'],
-            bazelDepsQuery: "bazel query 'deps(//apps/my-app)'",
+            bazelDepsQuery: true,
           },
         },
         {

@@ -238,8 +238,15 @@
           }
         },
         "bazel-deps-query": {
-          "description": "A bazel query command to run to dynamically resolve additional dependency paths. The output is parsed to extract local package paths which are merged with additional-paths. Example: \"bazel query 'deps(//my-service)'\"",
-          "type": "string"
+          "description": "Dynamically resolve additional dependency paths by running a bazel query. Set to true to auto-construct the default query for the package path. Alternatively, provide a query expression (e.g. \"deps(//combined-service)\") or a full \"bazel query ...\" string.",
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "string"
+            }
+          ]
         },
         "version-file": {
           "description": "Path to the specialize version file. Used by `ruby` and `simple` strategies.",
