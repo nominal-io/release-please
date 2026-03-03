@@ -682,7 +682,9 @@ export class Manifest {
         const queryExpression = resolveBazelQuery(config.bazelDepsQuery, path);
         bazelPaths = runBazelQuery(queryExpression, path, this.logger);
         this.logger.debug(
-          `bazel-deps-query resolved paths for ${path}: ${JSON.stringify(bazelPaths)}`
+          `bazel-deps-query resolved paths for ${path}: ${JSON.stringify(
+            bazelPaths
+          )}`
         );
       }
       // merge and deduplicate
