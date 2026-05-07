@@ -148,6 +148,10 @@ export interface CandidateReleasePullRequest {
   config: ReleaserConfig;
 }
 
+export interface CreatePullRequestsOptions {
+  sourcePullRequestNumber?: number;
+}
+
 export interface CandidateRelease extends Release {
   pullRequest: PullRequest;
   path: string;
@@ -783,7 +787,10 @@ export class Manifest {
         newReleasePullRequests.push({
           path,
           config,
-          pullRequest: releasePullRequest,
+          pullRequest: withSourcePullRequestNumbers(
+            releasePullRequest,
+            sourcePullRequestNumbers(commitsPerPath[path])
+          ),
         });
       }
     }
@@ -912,8 +919,20 @@ export class Manifest {
    *
    * @returns {PullRequest[]} Pull request numbers of release pull requests
    */
-  async createPullRequests(): Promise<(PullRequest | undefined)[]> {
-    const candidatePullRequests = await this.buildPullRequests();
+  async createPullRequests(
+    options: CreatePullRequestsOptions = {}
+  ): Promise<(PullRequest | undefined)[]> {
+    let candidatePullRequests = await this.buildPullRequests();
+    if (options.sourcePullRequestNumber) {
+      const sourcePullRequestNumber = options.sourcePullRequestNumber;
+      const unfilteredCount = candidatePullRequests.length;
+      candidatePullRequests = candidatePullRequests.filter(pullRequest =>
+        pullRequest.sourcePullRequestNumbers?.includes(sourcePullRequestNumber)
+      );
+      this.logger.info(
+        `Filtered release pull requests by source PR #${sourcePullRequestNumber}: ${candidatePullRequests.length}/${unfilteredCount} matched.`
+      );
+    }
     if (candidatePullRequests.length === 0) {
       return [];
     }
@@ -1035,9 +1054,15 @@ export class Manifest {
         openPullRequest.headBranchName === pullRequest.headRefName
     );
     if (existing) {
-      return this.alwaysUpdate
+      const updatedPullRequest = this.alwaysUpdate
         ? await this.updateExistingPullRequest(existing, pullRequest)
         : await this.maybeUpdateExistingPullRequest(existing, pullRequest);
+      return updatedPullRequest
+        ? withSourcePullRequestNumbers(
+            updatedPullRequest,
+            pullRequest.sourcePullRequestNumbers ?? []
+          )
+        : undefined;
     }
 
     // look for closed, snoozed pull request
@@ -1046,9 +1071,15 @@ export class Manifest {
         openPullRequest.headBranchName === pullRequest.headRefName
     );
     if (snoozed) {
-      return this.alwaysUpdate
+      const updatedPullRequest = this.alwaysUpdate
         ? await this.updateExistingPullRequest(snoozed, pullRequest)
         : await this.maybeUpdateSnoozedPullRequest(snoozed, pullRequest);
+      return updatedPullRequest
+        ? withSourcePullRequestNumbers(
+            updatedPullRequest,
+            pullRequest.sourcePullRequestNumbers ?? []
+          )
+        : undefined;
     }
 
     const body = await this.pullRequestOverflowHandler.handleOverflow(
@@ -1076,7 +1107,10 @@ export class Manifest {
       }
     );
 
-    return newPullRequest;
+    return withSourcePullRequestNumbers(
+      newPullRequest,
+      pullRequest.sourcePullRequestNumbers ?? []
+    );
   }
 
   /// only update an existing pull request if it has release note changes
@@ -1804,6 +1838,31 @@ function commitsAfterSha(commits: Commit[], lastReleaseSha: string) {
     return commits;
   }
   return commits.slice(0, index);
+}
+
+function sourcePullRequestNumbers(commits: Commit[]): number[] {
+  const numbers = new Set<number>();
+  for (const commit of commits) {
+    if (commit.pullRequest) {
+      numbers.add(commit.pullRequest.number);
+    }
+  }
+  return Array.from(numbers);
+}
+
+function withSourcePullRequestNumbers<
+  T extends {readonly sourcePullRequestNumbers?: number[]}
+>(pullRequest: T, numbers: number[]): T {
+  const sourcePullRequestNumbers = Array.from(
+    new Set([...(pullRequest.sourcePullRequestNumbers ?? []), ...numbers])
+  );
+  if (sourcePullRequestNumbers.length === 0) {
+    return pullRequest;
+  }
+  return {
+    ...pullRequest,
+    sourcePullRequestNumbers,
+  };
 }
 
 /**

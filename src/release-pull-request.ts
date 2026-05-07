@@ -25,5 +25,6 @@ export interface ReleasePullRequest {
   readonly version?: Version;
   readonly draft: boolean;
   readonly group?: string;
+  readonly sourcePullRequestNumbers?: number[];
   updates: Update[];
 }

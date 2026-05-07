@@ -22,4 +22,5 @@ export interface PullRequest {
   readonly labels: string[];
   readonly files: string[];
   readonly sha?: string;
+  readonly sourcePullRequestNumbers?: number[];
 }

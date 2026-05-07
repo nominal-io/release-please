@@ -337,6 +337,7 @@ interface MockCandidatePullRequestOptions {
   draft?: boolean;
   labels?: string[];
   group?: string;
+  sourcePullRequestNumbers?: number[];
 }
 export function buildMockCandidatePullRequest(
   path: string,
@@ -364,6 +365,7 @@ export function buildMockCandidatePullRequest(
       version,
       draft: options.draft ?? false,
       group: options.group,
+      sourcePullRequestNumbers: options.sourcePullRequestNumbers,
     },
     config: {
       releaseType,
