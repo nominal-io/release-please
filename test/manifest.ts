@@ -1571,6 +1571,16 @@ describe('Manifest', () => {
             sha: 'def456',
             message: 'fix: some bugfix',
             files: [],
+            pullRequest: {
+              headBranchName: 'bugfix-branch',
+              baseBranchName: 'main',
+              number: 456,
+              title: 'fix: some bugfix',
+              body: '',
+              labels: [],
+              files: [],
+              sha: 'def456',
+            },
           },
           {
             sha: 'abc123',
@@ -1614,6 +1624,7 @@ describe('Manifest', () => {
         expect(pullRequest.headRefName).to.eql(
           'release-please--branches--main'
         );
+        expect(pullRequest.sourcePullRequestNumbers).to.eql([456]);
       });
 
       it('should honour the manifestFile argument in Manifest.fromManifest', async () => {
@@ -4040,6 +4051,94 @@ describe('Manifest', () => {
       expect(pullRequests.map(pullRequest => pullRequest!.number)).to.eql([
         123, 124,
       ]);
+    });
+
+    it('filters pull requests by source pull request number', async () => {
+      mockPullRequests(github, []);
+      const createPullRequestStub = sandbox
+        .stub(github, 'createPullRequest')
+        .resolves({
+          number: 124,
+          title: 'pr title2',
+          body: 'pr body2',
+          headBranchName: 'release-please/branches/main2',
+          baseBranchName: 'main',
+          labels: [],
+          files: [],
+        });
+      const manifest = new Manifest(
+        github,
+        'main',
+        {
+          'path/a': {
+            releaseType: 'node',
+            component: 'pkg1',
+          },
+          'path/b': {
+            releaseType: 'node',
+            component: 'pkg2',
+          },
+        },
+        {
+          'path/a': Version.parse('1.0.0'),
+          'path/b': Version.parse('0.2.3'),
+        },
+        {
+          separatePullRequests: true,
+          plugins: ['node-workspace'],
+        }
+      );
+      sandbox.stub(manifest, 'buildPullRequests').resolves([
+        {
+          title: PullRequestTitle.ofTargetBranch('main'),
+          body: new PullRequestBody([
+            {
+              notes: 'Some release notes',
+            },
+          ]),
+          updates: [
+            {
+              path: 'README.md',
+              createIfMissing: false,
+              updater: new RawContent('some raw content'),
+            },
+          ],
+          labels: [],
+          headRefName: 'release-please/branches/main',
+          draft: false,
+          sourcePullRequestNumbers: [123],
+        },
+        {
+          title: PullRequestTitle.ofTargetBranch('main'),
+          body: new PullRequestBody([
+            {
+              notes: 'Some release notes 2',
+            },
+          ]),
+          updates: [
+            {
+              path: 'pkg2/README.md',
+              createIfMissing: false,
+              updater: new RawContent('some raw content 2'),
+            },
+          ],
+          labels: [],
+          headRefName: 'release-please/branches/main2',
+          draft: false,
+          sourcePullRequestNumbers: [456],
+        },
+      ]);
+      const pullRequests = await manifest.createPullRequests({
+        sourcePullRequestNumber: 456,
+      });
+      sinon.assert.calledOnce(createPullRequestStub);
+      expect(createPullRequestStub.firstCall.args[0].headBranchName).to.eql(
+        'release-please/branches/main2'
+      );
+      expect(pullRequests.map(pullRequest => pullRequest!.number)).to.eql([
+        124,
+      ]);
+      expect(pullRequests[0]!.sourcePullRequestNumbers).to.eql([456]);
     });
 
     it('handles signoff users', async function () {
