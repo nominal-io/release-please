@@ -47,6 +47,7 @@ import {
 } from './util/pull-request-overflow-handler';
 import {signoffCommitMessage} from './util/signoff-commit-message';
 import {CommitExclude} from './util/commit-exclude';
+import {runBazelQuery, resolveBazelQuery} from './util/bazel-query';
 
 type ExtraGenericFile = {
   type: 'generic';
@@ -143,6 +144,7 @@ export interface ReleaserConfig {
   // Manifest only
   excludePaths?: string[];
   additionalPaths?: string[];
+  bazelDepsQuery?: boolean | string;
 }
 
 export interface CandidateReleasePullRequest {
@@ -199,6 +201,7 @@ interface ReleaserConfigJson {
   'initial-version'?: string;
   'exclude-paths'?: string[]; // manifest-only
   'additional-paths'?: string[]; // manifest-only
+  'bazel-deps-query'?: boolean | string; // manifest-only
   'date-format'?: string;
 }
 
@@ -688,14 +691,33 @@ export class Manifest {
       );
     }
 
+    // resolve bazel-deps-query for each package and merge with additionalPaths
+    const resolvedAdditionalPaths: Record<string, string[]> = {};
+    for (const [path, config] of Object.entries(this.repositoryConfig)) {
+      const staticPaths = config.additionalPaths || [];
+      let bazelPaths: string[] = [];
+      if (config.bazelDepsQuery) {
+        const queryExpression = resolveBazelQuery(config.bazelDepsQuery, path);
+        bazelPaths = runBazelQuery(queryExpression, path, this.logger);
+        this.logger.info(
+          `bazel-deps-query resolved paths for ${path}: ${JSON.stringify(
+            bazelPaths
+          )}`
+        );
+      }
+      // merge and deduplicate
+      const allPaths = [...new Set([...staticPaths, ...bazelPaths])];
+      resolvedAdditionalPaths[path] = allPaths;
+    }
+
     // split commits by path
     this.logger.info(`Splitting ${commits.length} commits by path`);
     const cs = new CommitSplit({
       includeEmpty: true,
       packagePaths: Object.fromEntries(
-        Object.entries(this.repositoryConfig).map(([path, config]) => [
+        Object.entries(this.repositoryConfig).map(([path]) => [
           path,
-          config.additionalPaths || [],
+          resolvedAdditionalPaths[path] || [],
         ])
       ),
     });
@@ -1467,6 +1489,7 @@ function extractReleaserConfig(
     initialVersion: config['initial-version'],
     excludePaths: config['exclude-paths'],
     additionalPaths: config['additional-paths'],
+    bazelDepsQuery: config['bazel-deps-query'],
     dateFormat: config['date-format'],
   };
 }
@@ -1835,6 +1858,7 @@ function mergeReleaserConfig(
     excludePaths: pathConfig.excludePaths ?? defaultConfig.excludePaths,
     additionalPaths:
       pathConfig.additionalPaths ?? defaultConfig.additionalPaths,
+    bazelDepsQuery: pathConfig.bazelDepsQuery ?? defaultConfig.bazelDepsQuery,
     dateFormat: pathConfig.dateFormat ?? defaultConfig.dateFormat,
   };
 }
