@@ -13,7 +13,7 @@
 // limitations under the License.
 
 import {describe, it, beforeEach, afterEach} from 'mocha';
-import {Manifest, MissingReleaseDataError} from '../src/manifest';
+import {Manifest} from '../src/manifest';
 import {GitHub, ReleaseOptions} from '../src/github';
 import * as githubModule from '../src/github';
 import * as sinon from 'sinon';
@@ -4904,7 +4904,7 @@ describe('Manifest', () => {
   });
 
   describe('buildReleases', () => {
-    it('should throw if a merged release pull request lacks a candidate release tag', async () => {
+    it('should recover if a merged release pull request lacks a candidate release tag', async () => {
       mockPullRequests(
         github,
         [],
@@ -4947,16 +4947,20 @@ describe('Manifest', () => {
         }
       );
 
-      try {
-        await manifest.buildReleases();
-        expect.fail('expected buildReleases to throw');
-      } catch (err) {
-        expect(err).to.be.instanceof(MissingReleaseDataError);
-        expect((err as MissingReleaseDataError).paths).to.eql([
-          'packages/bot-config-utils',
-        ]);
-        expect((err as MissingReleaseDataError).components).to.eql(['pkg-a']);
-      }
+      const releases = await manifest.buildReleases();
+      expect(releases.map(release => release.path)).to.eql([
+        'packages/label-utils',
+        'packages/bot-config-utils',
+      ]);
+      expect(releases[0].tag.toString()).to.eql(
+        '@google-automations/label-utils-v1.1.0'
+      );
+      expect(releases[1].tag.toString()).to.eql('v3.2.0');
+      expect(releases[1].name).to.eql('v3.2.0');
+      expect(releases[1].sha).to.eql('abc123');
+      expect(releases[1].notes)
+        .to.be.a('string')
+        .and.satisfy((msg: string) => msg.startsWith('### Features'));
     });
 
     it('should match release data by component, not config path', async () => {

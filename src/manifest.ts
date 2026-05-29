@@ -23,7 +23,7 @@ import {TagName} from './util/tag-name';
 import {Repository} from './repository';
 import {BranchName} from './util/branch-name';
 import {PullRequestTitle} from './util/pull-request-title';
-import {PullRequestBody} from './util/pull-request-body';
+import {PullRequestBody, ReleaseData} from './util/pull-request-body';
 import {ReleasePullRequest} from './release-pull-request';
 import {
   buildStrategy,
@@ -169,7 +169,7 @@ interface ExpectedRelease {
   pullRequest: PullRequest;
   path: string;
   component?: string;
-  version: string;
+  releaseData: ReleaseData;
 }
 
 interface ReleaserConfigJson {
@@ -310,35 +310,6 @@ const DEFAULT_COMMIT_SEARCH_DEPTH = 500;
 const DEFAULT_COMMIT_BATCH_SIZE = 10;
 
 export const MANIFEST_PULL_REQUEST_TITLE_PATTERN = 'chore: release ${branch}';
-
-export interface CandidateReleaseData {
-  pullRequest: PullRequest;
-  path: string;
-  component?: string;
-}
-
-export class MissingReleaseDataError extends Error {
-  readonly pullRequestNumber: number;
-  readonly paths: string[];
-  readonly components: (string | undefined)[];
-  constructor(matches: CandidateReleaseData[]) {
-    const missing = matches.map(release =>
-      release.component
-        ? `${release.path} (${release.component})`
-        : release.path
-    );
-    const pullRequestNumber = matches[0]?.pullRequest.number;
-    super(
-      `Merged release pull request #${pullRequestNumber} is missing release data for: ${missing.join(
-        ', '
-      )}`
-    );
-    this.name = MissingReleaseDataError.name;
-    this.pullRequestNumber = pullRequestNumber;
-    this.paths = matches.map(release => release.path);
-    this.components = matches.map(release => release.component);
-  }
-}
 
 export interface CreatedRelease extends ScmRelease {
   id: number;
@@ -1052,7 +1023,7 @@ export class Manifest {
           pullRequest,
           path,
           component: data.component,
-          version: data.version.toString(),
+          releaseData: data,
         });
       }
     }
@@ -1075,6 +1046,41 @@ export class Manifest {
       }
     }
     return undefined;
+  }
+
+  private async candidateReleaseFromReleaseData(
+    expectedRelease: ExpectedRelease,
+    strategiesByPath: Record<string, Strategy>
+  ): Promise<CandidateRelease> {
+    const {path, pullRequest, releaseData} = expectedRelease;
+    const config = this.repositoryConfig[path];
+    const strategy = strategiesByPath[path];
+    const component = await strategy.getComponent();
+    const version = releaseData.version!;
+    const tag = new TagName(
+      version,
+      config.includeComponentInTag === false ? undefined : component,
+      config.tagSeparator,
+      config.includeVInTag
+    );
+    const versionPrefix = config.includeVInReleaseName === false ? '' : 'v';
+    const releaseName =
+      component && config.includeComponentInTag !== false
+        ? `${component}: ${versionPrefix}${version.toString()}`
+        : `${versionPrefix}${version.toString()}`;
+    return {
+      name: releaseName,
+      tag,
+      notes: releaseData.notes || '',
+      sha: pullRequest.sha!,
+      path,
+      component,
+      pullRequest,
+      draft: config.draft ?? this.draft,
+      forceTag: config.forceTag,
+      prerelease:
+        config.prerelease && (!!version.preRelease || version.major === 0),
+    };
   }
 
   private async findOpenReleasePullRequests(): Promise<PullRequest[]> {
@@ -1343,11 +1349,20 @@ export class Manifest {
           !pullRequestCandidateReleases.some(
             release =>
               release.path === expectedRelease.path &&
-              release.tag.version.toString() === expectedRelease.version
+              release.tag.version.toString() ===
+                expectedRelease.releaseData.version!.toString()
           )
       );
-      if (missingReleases.length > 0) {
-        throw new MissingReleaseDataError(missingReleases);
+      for (const expectedRelease of missingReleases) {
+        this.logger.info(
+          `Recovering release candidate for path: ${expectedRelease.path}`
+        );
+        pullRequestCandidateReleases.push(
+          await this.candidateReleaseFromReleaseData(
+            expectedRelease,
+            strategiesByPath
+          )
+        );
       }
       candidateReleases.push(...pullRequestCandidateReleases);
     }
