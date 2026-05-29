@@ -54,10 +54,6 @@ describe('Rust', () => {
   describe('buildReleasePullRequest', () => {
     it('returns release PR changes with defaultInitialVersion', async () => {
       const expectedVersion = '0.1.0';
-      sandbox
-        .stub(github, 'getFileContentsOnBranch')
-        .withArgs('Cargo.toml', 'main')
-        .resolves(buildGitHubFileContent(fixturesPath, 'Cargo-crate1.toml'));
       const strategy = new Rust({
         targetBranch: 'main',
         github,
@@ -73,10 +69,6 @@ describe('Rust', () => {
 
     it('returns release PR changes with semver patch bump', async () => {
       const expectedVersion = '0.123.5';
-      sandbox
-        .stub(github, 'getFileContentsOnBranch')
-        .withArgs('Cargo.toml', 'main')
-        .resolves(buildGitHubFileContent(fixturesPath, 'Cargo-crate1.toml'));
       const strategy = new Rust({
         targetBranch: 'main',
         github,

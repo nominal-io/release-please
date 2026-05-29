@@ -19,8 +19,7 @@ import {LocalGitHub} from '../src/local-github';
 describe('LocalGitHub', () => {
   let localGitHub: LocalGitHub;
 
-  before(async function () {
-    this.timeout(15000);
+  before(async () => {
     localGitHub = await LocalGitHub.create({
       owner: 'googleapis',
       repo: 'release-please',

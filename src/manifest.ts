@@ -23,7 +23,6 @@ import {TagName} from './util/tag-name';
 import {Repository} from './repository';
 import {BranchName} from './util/branch-name';
 import {PullRequestTitle} from './util/pull-request-title';
-import {PullRequestBody, ReleaseData} from './util/pull-request-body';
 import {ReleasePullRequest} from './release-pull-request';
 import {
   buildStrategy,
@@ -159,17 +158,9 @@ export interface CreatePullRequestsOptions {
 export interface CandidateRelease extends Release {
   pullRequest: PullRequest;
   path: string;
-  component?: string;
   draft?: boolean;
   forceTag?: boolean;
   prerelease?: boolean;
-}
-
-interface ExpectedRelease {
-  pullRequest: PullRequest;
-  path: string;
-  component?: string;
-  releaseData: ReleaseData;
 }
 
 interface ReleaserConfigJson {
@@ -1002,87 +993,6 @@ export class Manifest {
     }
   }
 
-  private async expectedReleases(
-    pullRequest: PullRequest,
-    strategiesByPath: Record<string, Strategy>
-  ): Promise<ExpectedRelease[]> {
-    const pullRequestBody = PullRequestBody.parse(
-      pullRequest.body,
-      this.logger
-    );
-    if (!pullRequestBody) {
-      return [];
-    }
-    const expectedReleases: ExpectedRelease[] = [];
-    for (const data of pullRequestBody.releaseData) {
-      const path = data.component
-        ? await this.expectedReleasePath(data.component, strategiesByPath)
-        : undefined;
-      if (path && data.version) {
-        expectedReleases.push({
-          pullRequest,
-          path,
-          component: data.component,
-          releaseData: data,
-        });
-      }
-    }
-    return expectedReleases;
-  }
-
-  private async expectedReleasePath(
-    component: string,
-    strategiesByPath: Record<string, Strategy>
-  ): Promise<string | undefined> {
-    for (const path in strategiesByPath) {
-      if (this.repositoryConfig[path].skipGithubRelease) {
-        continue;
-      }
-      const strategy = strategiesByPath[path];
-      const strategyComponent = await strategy.getComponent();
-      const branchComponent = await strategy.getBranchComponent();
-      if (component === strategyComponent || component === branchComponent) {
-        return path;
-      }
-    }
-    return undefined;
-  }
-
-  private async candidateReleaseFromReleaseData(
-    expectedRelease: ExpectedRelease,
-    strategiesByPath: Record<string, Strategy>
-  ): Promise<CandidateRelease> {
-    const {path, pullRequest, releaseData} = expectedRelease;
-    const config = this.repositoryConfig[path];
-    const strategy = strategiesByPath[path];
-    const component = await strategy.getComponent();
-    const version = releaseData.version!;
-    const tag = new TagName(
-      version,
-      config.includeComponentInTag === false ? undefined : component,
-      config.tagSeparator,
-      config.includeVInTag
-    );
-    const versionPrefix = config.includeVInReleaseName === false ? '' : 'v';
-    const releaseName =
-      component && config.includeComponentInTag !== false
-        ? `${component}: ${versionPrefix}${version.toString()}`
-        : `${versionPrefix}${version.toString()}`;
-    return {
-      name: releaseName,
-      tag,
-      notes: releaseData.notes || '',
-      sha: pullRequest.sha!,
-      path,
-      component,
-      pullRequest,
-      draft: config.draft ?? this.draft,
-      forceTag: config.forceTag,
-      prerelease:
-        config.prerelease && (!!version.preRelease || version.major === 0),
-    };
-  }
-
   private async findOpenReleasePullRequests(): Promise<PullRequest[]> {
     this.logger.info('Looking for open release pull requests');
     const openPullRequests: PullRequest[] = [];
@@ -1314,26 +1224,19 @@ export class Manifest {
     const generator = await this.findMergedReleasePullRequests();
     const candidateReleases: CandidateRelease[] = [];
     for await (const pullRequest of generator) {
-      const pullRequestCandidateReleases: CandidateRelease[] = [];
-      const expectedReleases = await this.expectedReleases(
-        pullRequest,
-        strategiesByPath
-      );
       for (const path in this.repositoryConfig) {
         const config = this.repositoryConfig[path];
         this.logger.info(`Building release for path: ${path}`);
         this.logger.debug(`type: ${config.releaseType}`);
         this.logger.debug(`targetBranch: ${this.targetBranch}`);
         const strategy = strategiesByPath[path];
-        const component = await strategy.getComponent();
         const releases = await strategy.buildReleases(pullRequest, {
           groupPullRequestTitlePattern: this.groupPullRequestTitlePattern,
         });
         for (const release of releases) {
-          pullRequestCandidateReleases.push({
+          candidateReleases.push({
             ...release,
             path,
-            component,
             pullRequest,
             draft: config.draft ?? this.draft,
             forceTag: config.forceTag,
@@ -1344,27 +1247,6 @@ export class Manifest {
           });
         }
       }
-      const missingReleases = expectedReleases.filter(
-        expectedRelease =>
-          !pullRequestCandidateReleases.some(
-            release =>
-              release.path === expectedRelease.path &&
-              release.tag.version.toString() ===
-                expectedRelease.releaseData.version!.toString()
-          )
-      );
-      for (const expectedRelease of missingReleases) {
-        this.logger.info(
-          `Recovering release candidate for path: ${expectedRelease.path}`
-        );
-        pullRequestCandidateReleases.push(
-          await this.candidateReleaseFromReleaseData(
-            expectedRelease,
-            strategiesByPath
-          )
-        );
-      }
-      candidateReleases.push(...pullRequestCandidateReleases);
     }
 
     return candidateReleases;
