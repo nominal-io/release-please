@@ -23,6 +23,7 @@ import {TagName} from './util/tag-name';
 import {Repository} from './repository';
 import {BranchName} from './util/branch-name';
 import {PullRequestTitle} from './util/pull-request-title';
+import {PullRequestBody} from './util/pull-request-body';
 import {ReleasePullRequest} from './release-pull-request';
 import {
   buildStrategy,
@@ -158,9 +159,17 @@ export interface CreatePullRequestsOptions {
 export interface CandidateRelease extends Release {
   pullRequest: PullRequest;
   path: string;
+  component?: string;
   draft?: boolean;
   forceTag?: boolean;
   prerelease?: boolean;
+}
+
+interface ExpectedRelease {
+  pullRequest: PullRequest;
+  path: string;
+  component?: string;
+  version: string;
 }
 
 interface ReleaserConfigJson {
@@ -301,6 +310,35 @@ const DEFAULT_COMMIT_SEARCH_DEPTH = 500;
 const DEFAULT_COMMIT_BATCH_SIZE = 10;
 
 export const MANIFEST_PULL_REQUEST_TITLE_PATTERN = 'chore: release ${branch}';
+
+export interface CandidateReleaseData {
+  pullRequest: PullRequest;
+  path: string;
+  component?: string;
+}
+
+export class MissingReleaseDataError extends Error {
+  readonly pullRequestNumber: number;
+  readonly paths: string[];
+  readonly components: (string | undefined)[];
+  constructor(matches: CandidateReleaseData[]) {
+    const missing = matches.map(release =>
+      release.component
+        ? `${release.path} (${release.component})`
+        : release.path
+    );
+    const pullRequestNumber = matches[0]?.pullRequest.number;
+    super(
+      `Merged release pull request #${pullRequestNumber} is missing release data for: ${missing.join(
+        ', '
+      )}`
+    );
+    this.name = MissingReleaseDataError.name;
+    this.pullRequestNumber = pullRequestNumber;
+    this.paths = matches.map(release => release.path);
+    this.components = matches.map(release => release.component);
+  }
+}
 
 export interface CreatedRelease extends ScmRelease {
   id: number;
@@ -993,6 +1031,55 @@ export class Manifest {
     }
   }
 
+  private async expectedReleases(
+    pullRequest: PullRequest,
+    strategiesByPath: Record<string, Strategy>
+  ): Promise<ExpectedRelease[]> {
+    const pullRequestBody = PullRequestBody.parse(
+      pullRequest.body,
+      this.logger
+    );
+    if (!pullRequestBody) {
+      return [];
+    }
+    const expectedReleases: ExpectedRelease[] = [];
+    for (const data of pullRequestBody.releaseData) {
+      const path = data.component
+        ? await this.expectedReleasePath(data.component, strategiesByPath)
+        : undefined;
+      if (path && data.version) {
+        expectedReleases.push({
+          pullRequest,
+          path,
+          component: data.component,
+          version: data.version.toString(),
+        });
+      }
+    }
+    return expectedReleases;
+  }
+
+  private async expectedReleasePath(
+    component: string,
+    strategiesByPath: Record<string, Strategy>
+  ): Promise<string | undefined> {
+    if (this.repositoryConfig[component]) {
+      return component;
+    }
+    for (const path in strategiesByPath) {
+      if (this.repositoryConfig[path].skipGithubRelease) {
+        continue;
+      }
+      const strategy = strategiesByPath[path];
+      const strategyComponent = await strategy.getComponent();
+      const branchComponent = await strategy.getBranchComponent();
+      if (component === strategyComponent || component === branchComponent) {
+        return path;
+      }
+    }
+    return undefined;
+  }
+
   private async findOpenReleasePullRequests(): Promise<PullRequest[]> {
     this.logger.info('Looking for open release pull requests');
     const openPullRequests: PullRequest[] = [];
@@ -1224,19 +1311,26 @@ export class Manifest {
     const generator = await this.findMergedReleasePullRequests();
     const candidateReleases: CandidateRelease[] = [];
     for await (const pullRequest of generator) {
+      const pullRequestCandidateReleases: CandidateRelease[] = [];
+      const expectedReleases = await this.expectedReleases(
+        pullRequest,
+        strategiesByPath
+      );
       for (const path in this.repositoryConfig) {
         const config = this.repositoryConfig[path];
         this.logger.info(`Building release for path: ${path}`);
         this.logger.debug(`type: ${config.releaseType}`);
         this.logger.debug(`targetBranch: ${this.targetBranch}`);
         const strategy = strategiesByPath[path];
+        const component = await strategy.getComponent();
         const releases = await strategy.buildReleases(pullRequest, {
           groupPullRequestTitlePattern: this.groupPullRequestTitlePattern,
         });
         for (const release of releases) {
-          candidateReleases.push({
+          pullRequestCandidateReleases.push({
             ...release,
             path,
+            component,
             pullRequest,
             draft: config.draft ?? this.draft,
             forceTag: config.forceTag,
@@ -1247,6 +1341,18 @@ export class Manifest {
           });
         }
       }
+      const missingReleases = expectedReleases.filter(
+        expectedRelease =>
+          !pullRequestCandidateReleases.some(
+            release =>
+              release.path === expectedRelease.path &&
+              release.tag.version.toString() === expectedRelease.version
+          )
+      );
+      if (missingReleases.length > 0) {
+        throw new MissingReleaseDataError(missingReleases);
+      }
+      candidateReleases.push(...pullRequestCandidateReleases);
     }
 
     return candidateReleases;

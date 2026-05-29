@@ -13,7 +13,7 @@
 // limitations under the License.
 
 import {describe, it, beforeEach, afterEach} from 'mocha';
-import {Manifest} from '../src/manifest';
+import {Manifest, MissingReleaseDataError} from '../src/manifest';
 import {GitHub, ReleaseOptions} from '../src/github';
 import * as githubModule from '../src/github';
 import * as sinon from 'sinon';
@@ -4904,6 +4904,61 @@ describe('Manifest', () => {
   });
 
   describe('buildReleases', () => {
+    it('should throw if a merged release pull request lacks a candidate release tag', async () => {
+      mockPullRequests(
+        github,
+        [],
+        [
+          {
+            headBranchName: 'release-please/branches/main',
+            baseBranchName: 'main',
+            number: 1234,
+            title: 'chore: release main',
+            body: pullRequestBody('release-notes/multiple.txt').replace(
+              '@google-automations/bot-config-utils',
+              'pkg-a'
+            ),
+            labels: ['autorelease: pending'],
+            files: [
+              'packages/bot-config-utils/package.json',
+              'packages/label-utils/package.json',
+            ],
+            sha: 'abc123',
+          },
+        ]
+      );
+      const manifest = new Manifest(
+        github,
+        'main',
+        {
+          'packages/bot-config-utils': {
+            releaseType: 'simple',
+            component: 'pkg-a',
+            includeComponentInTag: false,
+          },
+          'packages/label-utils': {
+            releaseType: 'simple',
+            component: '@google-automations/label-utils',
+          },
+        },
+        {
+          'packages/bot-config-utils': Version.parse('3.1.4'),
+          'packages/label-utils': Version.parse('1.0.1'),
+        }
+      );
+
+      try {
+        await manifest.buildReleases();
+        expect.fail('expected buildReleases to throw');
+      } catch (err) {
+        expect(err).to.be.instanceof(MissingReleaseDataError);
+        expect((err as MissingReleaseDataError).paths).to.eql([
+          'packages/bot-config-utils',
+        ]);
+        expect((err as MissingReleaseDataError).components).to.eql(['pkg-a']);
+      }
+    });
+
     it('should handle a single manifest release', async () => {
       mockPullRequests(
         github,

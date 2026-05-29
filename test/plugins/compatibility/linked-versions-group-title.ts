@@ -172,5 +172,89 @@ describe('Plugin compatibility', () => {
       const releases = await manifest.buildReleases();
       expect(releases).lengthOf(2);
     });
+    it('should find releases when a component omits v in tag', async () => {
+      mockReleases(sandbox, github, [
+        {
+          id: 123456,
+          sha: 'abc123',
+          tagName: 'primary-v1.0.0',
+          url: 'https://github.com/fake-owner/fake-repo/releases/tag/primary-v1.0.0',
+        },
+        {
+          id: 654321,
+          sha: 'abc123',
+          tagName: 'pkgA-v1.0.0',
+          url: 'https://github.com/fake-owner/fake-repo/releases/tag/pkgA-v1.0.0',
+        },
+      ]);
+      const body = `:robot: I have created a release *beep* *boop*
+---
+
+<details><summary>primary: 1.1.0</summary>
+
+### Features
+
+* some feature
+</details>
+
+<details><summary>pkgA: 1.1.0</summary>
+
+### Features
+
+* some feature
+</details>
+
+---
+This PR was generated with [Release Please](https://github.com/googleapis/release-please).`;
+      mockPullRequests(sandbox, github, [
+        {
+          headBranchName: 'release-please--branches--main--groups--my-group',
+          baseBranchName: 'main',
+          number: 1234,
+          title: 'chore(main): release primary 1.1.0',
+          body,
+          labels: ['autorelease: pending'],
+          files: [],
+          sha: 'cccccc',
+        },
+      ]);
+      const manifest = new Manifest(
+        github,
+        'main',
+        {
+          '.': {
+            releaseType: 'node',
+            component: 'primary',
+            includeVInTag: false,
+          },
+          'packages/nodeA': {
+            releaseType: 'node',
+            component: 'pkgA',
+          },
+        },
+        {
+          '.': Version.parse('1.0.0'),
+          'packages/nodeA': Version.parse('1.0.0'),
+        },
+        {
+          plugins: [
+            {
+              type: 'linked-versions',
+              groupName: 'my group',
+              components: ['primary', 'pkgA'],
+              merge: false,
+            },
+          ],
+          groupPullRequestTitlePattern:
+            'chore${scope}: release${component} ${version}',
+        }
+      );
+
+      const releases = await manifest.buildReleases();
+      expect(releases.map(release => release.path)).to.eql([
+        '.',
+        'packages/nodeA',
+      ]);
+    });
   });
 });
