@@ -4959,6 +4959,60 @@ describe('Manifest', () => {
       }
     });
 
+    it('should match release data by component, not config path', async () => {
+      mockPullRequests(
+        github,
+        [],
+        [
+          {
+            headBranchName: 'release-please/branches/main',
+            baseBranchName: 'main',
+            number: 1234,
+            title: 'chore: release main',
+            body: pullRequestBody('release-notes/multiple.txt').replace(
+              '@google-automations/bot-config-utils',
+              'pkg-a'
+            ),
+            labels: ['autorelease: pending'],
+            files: [
+              'packages/bot-config-utils/package.json',
+              'packages/label-utils/package.json',
+            ],
+            sha: 'abc123',
+          },
+        ]
+      );
+      const manifest = new Manifest(
+        github,
+        'main',
+        {
+          'pkg-a': {
+            releaseType: 'simple',
+            component: 'pkg-b',
+          },
+          'packages/bot-config-utils': {
+            releaseType: 'simple',
+            component: 'pkg-a',
+          },
+          'packages/label-utils': {
+            releaseType: 'simple',
+            component: '@google-automations/label-utils',
+          },
+        },
+        {
+          'pkg-a': Version.parse('3.1.4'),
+          'packages/bot-config-utils': Version.parse('3.1.4'),
+          'packages/label-utils': Version.parse('1.0.1'),
+        }
+      );
+
+      const releases = await manifest.buildReleases();
+      expect(releases.map(release => release.path)).to.eql([
+        'packages/bot-config-utils',
+        'packages/label-utils',
+      ]);
+    });
+
     it('should handle a single manifest release', async () => {
       mockPullRequests(
         github,

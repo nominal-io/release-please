@@ -1063,9 +1063,6 @@ export class Manifest {
     component: string,
     strategiesByPath: Record<string, Strategy>
   ): Promise<string | undefined> {
-    if (this.repositoryConfig[component]) {
-      return component;
-    }
     for (const path in strategiesByPath) {
       if (this.repositoryConfig[path].skipGithubRelease) {
         continue;
