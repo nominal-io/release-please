@@ -4,6 +4,14 @@
 
 [1]: https://www.npmjs.com/package/release-please?activeTab=versions
 
+## [18.2.2](https://github.com/nominal-io/release-please/compare/v18.2.1...v18.2.2) (2026-07-22)
+
+
+### Bug Fixes
+
+* **manifest:** fail when release data lacks candidate ([#18](https://github.com/nominal-io/release-please/issues/18)) ([46a5109](https://github.com/nominal-io/release-please/commit/46a5109105713072cf393f20697a9e26877b147f))
+* **manifest:** scope untagged-merged guard to affected release branches ([#21](https://github.com/nominal-io/release-please/issues/21)) ([c682692](https://github.com/nominal-io/release-please/commit/c68269233922a72561170043e169d2443d486612))
+
 ## [18.2.1](https://github.com/nominal-io/release-please/compare/v18.2.0...v18.2.1) (2026-05-07)
 
 
