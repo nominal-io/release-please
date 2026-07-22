@@ -52,6 +52,20 @@ export abstract class ManifestPlugin {
   }
 
   /**
+   * Whether this plugin can make one release branch's pull request depend
+   * on another release branch's unreleased artifact (e.g. a workspace
+   * plugin with merging disabled writes a dependency requirement on a
+   * sibling's in-flight version into dependents' pull requests). When true,
+   * release branches are not independent of each other. Plugins that only
+   * synchronize version numbers across branches (e.g. linked-versions) do
+   * not create such a dependency and should return false.
+   * @returns {boolean} true if release branches are not independent
+   */
+  couplesVersionsAcrossBranches(): boolean {
+    return false;
+  }
+
+  /**
    * Post-process candidate pull requests.
    * @param {CandidateReleasePullRequest[]} pullRequests Candidate pull requests
    * @returns {CandidateReleasePullRequest[]} Updated pull requests

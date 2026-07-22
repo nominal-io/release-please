@@ -960,13 +960,39 @@ export class Manifest {
       return [];
     }
 
-    // if there are any merged, pending release pull requests, don't open
-    // any new release PRs
+    // Don't open a release PR for a group that already has a merged,
+    // pending (untagged) release PR: that group's next version is derived
+    // from its own tags, which are stale until the pending release is
+    // tagged. Other groups have separate tags and manifest entries and may
+    // proceed, unless a plugin couples versions across release branches:
+    // then no branch is independent and any pending release blocks all of
+    // them. Release PRs are keyed by branch (headBranchName === headRefName),
+    // the same way createOrUpdatePullRequest pairs candidates with existing
+    // PRs.
+    const pendingBranchNames = new Set<string>();
     const mergedPullRequestsGenerator = this.findMergedReleasePullRequests();
-    for await (const _ of mergedPullRequestsGenerator) {
+    for await (const mergedPullRequest of mergedPullRequestsGenerator) {
+      pendingBranchNames.add(mergedPullRequest.headBranchName);
+    }
+    if (
+      pendingBranchNames.size > 0 &&
+      this.plugins.some(plugin => plugin.couplesVersionsAcrossBranches())
+    ) {
       this.logger.warn(
-        'There are untagged, merged release PRs outstanding - aborting'
+        'There are untagged, merged release PRs outstanding and a plugin couples versions across release branches - aborting'
       );
+      return [];
+    }
+    candidatePullRequests = candidatePullRequests.filter(pullRequest => {
+      if (!pendingBranchNames.has(pullRequest.headRefName)) {
+        return true;
+      }
+      this.logger.warn(
+        `There is an untagged, merged release PR outstanding on branch '${pullRequest.headRefName}' - skipping the candidate release PR for this branch`
+      );
+      return false;
+    });
+    if (candidatePullRequests.length === 0) {
       return [];
     }
 
