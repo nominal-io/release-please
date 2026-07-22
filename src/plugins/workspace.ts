@@ -69,6 +69,15 @@ export abstract class WorkspacePlugin<T> extends ManifestPlugin {
     this.updateAllPackages = options.updateAllPackages ?? false;
     this.merge = options.merge ?? true;
   }
+
+  /**
+   * With merging disabled, dependency bumps make other release branches'
+   * pull requests depend on this branch's unreleased artifact.
+   */
+  couplesVersionsAcrossBranches(): boolean {
+    return !this.merge;
+  }
+
   async run(
     candidates: CandidateReleasePullRequest[]
   ): Promise<CandidateReleasePullRequest[]> {

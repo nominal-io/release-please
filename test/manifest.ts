@@ -4144,6 +4144,375 @@ describe('Manifest', () => {
       expect(pullRequests[0]!.sourcePullRequestNumbers).to.eql([456]);
     });
 
+    it('opens a release PR filtered by source PR when an unrelated group has an untagged, merged release PR', async () => {
+      const createPullRequestStub = sandbox
+        .stub(github, 'createPullRequest')
+        .resolves({
+          number: 124,
+          title: 'pr title2',
+          body: 'pr body2',
+          headBranchName: 'release-please/branches/main/components/pkg2',
+          baseBranchName: 'main',
+          labels: [],
+          files: [],
+        });
+      // pkg1's release PR is merged but not yet tagged.
+      mockPullRequests(
+        github,
+        [],
+        [
+          {
+            number: 999,
+            title: 'chore: release pkg1 1.2.3',
+            body: new PullRequestBody([{notes: 'pkg1 notes'}]).toString(),
+            headBranchName: 'release-please/branches/main/components/pkg1',
+            baseBranchName: 'main',
+            labels: ['autorelease: pending'],
+            files: [],
+          },
+        ]
+      );
+      const manifest = new Manifest(
+        github,
+        'main',
+        {
+          'path/a': {releaseType: 'node', component: 'pkg1'},
+          'path/b': {releaseType: 'node', component: 'pkg2'},
+        },
+        {
+          'path/a': Version.parse('1.0.0'),
+          'path/b': Version.parse('0.2.3'),
+        },
+        {separatePullRequests: true}
+      );
+      sandbox.stub(manifest, 'buildPullRequests').resolves([
+        {
+          title: PullRequestTitle.ofTargetBranch('main'),
+          body: new PullRequestBody([{notes: 'Some release notes 2'}]),
+          updates: [
+            {
+              path: 'pkg2/README.md',
+              createIfMissing: false,
+              updater: new RawContent('some raw content 2'),
+            },
+          ],
+          labels: [],
+          headRefName: 'release-please/branches/main/components/pkg2',
+          draft: false,
+          sourcePullRequestNumbers: [456],
+        },
+      ]);
+      const pullRequests = await manifest.createPullRequests({
+        sourcePullRequestNumber: 456,
+      });
+      sinon.assert.calledOnce(createPullRequestStub);
+      expect(pullRequests.map(pullRequest => pullRequest!.number)).to.eql([
+        124,
+      ]);
+    });
+
+    it('opens a release PR when an unrelated group has an untagged, merged release PR', async () => {
+      const createPullRequestStub = sandbox
+        .stub(github, 'createPullRequest')
+        .resolves({
+          number: 124,
+          title: 'pr title',
+          body: 'pr body',
+          headBranchName: 'release-please/branches/main/components/pkg2',
+          baseBranchName: 'main',
+          labels: [],
+          files: [],
+        });
+      // pkg1's release PR is merged but not yet tagged.
+      mockPullRequests(
+        github,
+        [],
+        [
+          {
+            number: 999,
+            title: 'chore: release pkg1 1.2.3',
+            body: new PullRequestBody([{notes: 'pkg1 notes'}]).toString(),
+            headBranchName: 'release-please/branches/main/components/pkg1',
+            baseBranchName: 'main',
+            labels: ['autorelease: pending'],
+            files: [],
+          },
+        ]
+      );
+      const manifest = new Manifest(
+        github,
+        'main',
+        {
+          'path/a': {releaseType: 'node', component: 'pkg1'},
+          'path/b': {releaseType: 'node', component: 'pkg2'},
+        },
+        {
+          'path/a': Version.parse('1.0.0'),
+          'path/b': Version.parse('0.2.3'),
+        },
+        {separatePullRequests: true}
+      );
+      sandbox.stub(manifest, 'buildPullRequests').resolves([
+        {
+          title: PullRequestTitle.ofTargetBranch('main'),
+          body: new PullRequestBody([{notes: 'Some release notes'}]),
+          updates: [
+            {
+              path: 'README.md',
+              createIfMissing: false,
+              updater: new RawContent('some raw content'),
+            },
+          ],
+          labels: [],
+          headRefName: 'release-please/branches/main/components/pkg2',
+          draft: false,
+          sourcePullRequestNumbers: [123],
+        },
+      ]);
+      const pullRequests = await manifest.createPullRequests();
+      sinon.assert.calledOnce(createPullRequestStub);
+      expect(pullRequests.map(pullRequest => pullRequest!.number)).to.eql([
+        124,
+      ]);
+    });
+
+    it('does not open a release PR for a group with an untagged, merged release PR', async () => {
+      const createPullRequestStub = sandbox.stub(github, 'createPullRequest');
+      // The same group's release PR (same branch) is merged but not yet tagged.
+      mockPullRequests(
+        github,
+        [],
+        [
+          {
+            number: 997,
+            title: 'chore: release pkg1 1.0.1',
+            body: new PullRequestBody([{notes: 'same group notes'}]).toString(),
+            headBranchName: 'release-please/branches/main/components/pkg1',
+            baseBranchName: 'main',
+            labels: ['autorelease: pending'],
+            files: [],
+          },
+        ]
+      );
+      const manifest = new Manifest(
+        github,
+        'main',
+        {
+          'path/a': {releaseType: 'node', component: 'pkg1'},
+          'path/b': {releaseType: 'node', component: 'pkg2'},
+        },
+        {
+          'path/a': Version.parse('1.0.0'),
+          'path/b': Version.parse('0.2.3'),
+        },
+        {separatePullRequests: true}
+      );
+      sandbox.stub(manifest, 'buildPullRequests').resolves([
+        {
+          title: PullRequestTitle.ofTargetBranch('main'),
+          body: new PullRequestBody([{notes: 'Some release notes'}]),
+          updates: [],
+          labels: [],
+          headRefName: 'release-please/branches/main/components/pkg1',
+          draft: false,
+          sourcePullRequestNumbers: [123],
+        },
+      ]);
+      const pullRequests = await manifest.createPullRequests();
+      expect(pullRequests).to.be.empty;
+      sinon.assert.notCalled(createPullRequestStub);
+    });
+
+    it('skips only the group with an untagged, merged release PR and opens the rest', async () => {
+      const createPullRequestStub = sandbox
+        .stub(github, 'createPullRequest')
+        .resolves({
+          number: 124,
+          title: 'pr title2',
+          body: 'pr body2',
+          headBranchName: 'release-please/branches/main/components/pkg2',
+          baseBranchName: 'main',
+          labels: [],
+          files: [],
+        });
+      // pkg1's release PR is merged but not yet tagged. Until it is tagged,
+      // buildPullRequests keeps regenerating a stale candidate for pkg1.
+      mockPullRequests(
+        github,
+        [],
+        [
+          {
+            number: 997,
+            title: 'chore: release pkg1 1.0.1',
+            body: new PullRequestBody([{notes: 'pkg1 notes'}]).toString(),
+            headBranchName: 'release-please/branches/main/components/pkg1',
+            baseBranchName: 'main',
+            labels: ['autorelease: pending'],
+            files: [],
+          },
+        ]
+      );
+      const manifest = new Manifest(
+        github,
+        'main',
+        {
+          'path/a': {releaseType: 'node', component: 'pkg1'},
+          'path/b': {releaseType: 'node', component: 'pkg2'},
+        },
+        {
+          'path/a': Version.parse('1.0.0'),
+          'path/b': Version.parse('0.2.3'),
+        },
+        {separatePullRequests: true}
+      );
+      sandbox.stub(manifest, 'buildPullRequests').resolves([
+        {
+          title: PullRequestTitle.ofTargetBranch('main'),
+          body: new PullRequestBody([{notes: 'pkg1 stale notes'}]),
+          updates: [],
+          labels: [],
+          headRefName: 'release-please/branches/main/components/pkg1',
+          draft: false,
+        },
+        {
+          title: PullRequestTitle.ofTargetBranch('main'),
+          body: new PullRequestBody([{notes: 'pkg2 release notes'}]),
+          updates: [],
+          labels: [],
+          headRefName: 'release-please/branches/main/components/pkg2',
+          draft: false,
+        },
+      ]);
+      const pullRequests = await manifest.createPullRequests();
+      sinon.assert.calledOnce(createPullRequestStub);
+      expect(createPullRequestStub.firstCall.args[0].headBranchName).to.eql(
+        'release-please/branches/main/components/pkg2'
+      );
+      expect(pullRequests.map(pullRequest => pullRequest!.number)).to.eql([
+        124,
+      ]);
+    });
+
+    it('does not open any release PRs when a plugin couples versions across branches', async () => {
+      const createPullRequestStub = sandbox.stub(github, 'createPullRequest');
+      // pkg1's release PR is merged but not yet tagged. With merging
+      // disabled, node-workspace can write pkg1's in-flight version into
+      // pkg2's release PR, so no release PR is safe to open.
+      mockPullRequests(
+        github,
+        [],
+        [
+          {
+            number: 997,
+            title: 'chore: release pkg1 1.0.1',
+            body: new PullRequestBody([{notes: 'pkg1 notes'}]).toString(),
+            headBranchName: 'release-please/branches/main/components/pkg1',
+            baseBranchName: 'main',
+            labels: ['autorelease: pending'],
+            files: [],
+          },
+        ]
+      );
+      const manifest = new Manifest(
+        github,
+        'main',
+        {
+          'path/a': {releaseType: 'node', component: 'pkg1'},
+          'path/b': {releaseType: 'node', component: 'pkg2'},
+        },
+        {
+          'path/a': Version.parse('1.0.0'),
+          'path/b': Version.parse('0.2.3'),
+        },
+        // With separatePullRequests, node-workspace defaults to merge: false.
+        {separatePullRequests: true, plugins: ['node-workspace']}
+      );
+      sandbox.stub(manifest, 'buildPullRequests').resolves([
+        {
+          title: PullRequestTitle.ofTargetBranch('main'),
+          body: new PullRequestBody([{notes: 'pkg2 release notes'}]),
+          updates: [],
+          labels: [],
+          headRefName: 'release-please/branches/main/components/pkg2',
+          draft: false,
+        },
+      ]);
+      const pullRequests = await manifest.createPullRequests();
+      expect(pullRequests).to.be.empty;
+      sinon.assert.notCalled(createPullRequestStub);
+    });
+
+    it('opens a release PR for a linked-versions group member when another member has an untagged, merged release PR', async () => {
+      const createPullRequestStub = sandbox
+        .stub(github, 'createPullRequest')
+        .resolves({
+          number: 124,
+          title: 'pr title',
+          body: 'pr body',
+          headBranchName: 'release-please/branches/main/components/pkg2',
+          baseBranchName: 'main',
+          labels: [],
+          files: [],
+        });
+      // pkg1's release PR is merged but not yet tagged. linked-versions
+      // only synchronizes version numbers across the group's branches; it
+      // does not make pkg2's release depend on pkg1's unreleased artifact,
+      // so pkg2's release PR may proceed.
+      mockPullRequests(
+        github,
+        [],
+        [
+          {
+            number: 999,
+            title: 'chore: release pkg1 1.0.1',
+            body: new PullRequestBody([{notes: 'pkg1 notes'}]).toString(),
+            headBranchName: 'release-please/branches/main/components/pkg1',
+            baseBranchName: 'main',
+            labels: ['autorelease: pending'],
+            files: [],
+          },
+        ]
+      );
+      const manifest = new Manifest(
+        github,
+        'main',
+        {
+          'path/a': {releaseType: 'node', component: 'pkg1'},
+          'path/b': {releaseType: 'node', component: 'pkg2'},
+        },
+        {
+          'path/a': Version.parse('1.0.0'),
+          'path/b': Version.parse('1.0.0'),
+        },
+        {
+          separatePullRequests: true,
+          plugins: [
+            {
+              type: 'linked-versions',
+              groupName: 'group',
+              components: ['pkg1', 'pkg2'],
+              merge: false,
+            },
+          ],
+        }
+      );
+      sandbox.stub(manifest, 'buildPullRequests').resolves([
+        {
+          title: PullRequestTitle.ofTargetBranch('main'),
+          body: new PullRequestBody([{notes: 'pkg2 release notes'}]),
+          updates: [],
+          labels: [],
+          headRefName: 'release-please/branches/main/components/pkg2',
+          draft: false,
+        },
+      ]);
+      const pullRequests = await manifest.createPullRequests();
+      sinon.assert.calledOnce(createPullRequestStub);
+      expect(pullRequests.map(pullRequest => pullRequest!.number)).to.eql([
+        124,
+      ]);
+    });
+
     it('handles signoff users', async function () {
       sandbox
         .stub(github, 'getFileContentsOnBranch')
