@@ -22,7 +22,7 @@ import {
 import {logger as defaultLogger, Logger} from '../util/logger';
 import {VersionsMap, Version} from '../version';
 import {Merge} from './merge';
-import {GitHub} from '../github';
+import {Scm} from '../scm';
 import {ReleasePleaseManifest} from '../updaters/release-please-manifest';
 
 export type DependencyGraph<T> = Map<string, DependencyNode<T>>;
@@ -59,7 +59,7 @@ export abstract class WorkspacePlugin<T> extends ManifestPlugin {
   private manifestPath: string;
   private merge: boolean;
   constructor(
-    github: GitHub,
+    github: Scm,
     targetBranch: string,
     repositoryConfig: RepositoryConfig,
     options: WorkspacePluginOptions = {}
@@ -69,6 +69,15 @@ export abstract class WorkspacePlugin<T> extends ManifestPlugin {
     this.updateAllPackages = options.updateAllPackages ?? false;
     this.merge = options.merge ?? true;
   }
+
+  /**
+   * With merging disabled, dependency bumps make other release branches'
+   * pull requests depend on this branch's unreleased artifact.
+   */
+  couplesVersionsAcrossBranches(): boolean {
+    return !this.merge;
+  }
+
   async run(
     candidates: CandidateReleasePullRequest[]
   ): Promise<CandidateReleasePullRequest[]> {

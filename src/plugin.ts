@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {GitHub} from './github';
+import {Scm} from './scm';
 import {CandidateReleasePullRequest, RepositoryConfig} from './manifest';
 import {Strategy} from './strategy';
 import {Commit, ConventionalCommit} from './commit';
@@ -26,12 +26,12 @@ import {logger as defaultLogger, Logger} from './util/logger';
  * or update existing files.
  */
 export abstract class ManifestPlugin {
-  readonly github: GitHub;
+  readonly github: Scm;
   readonly targetBranch: string;
   readonly repositoryConfig: RepositoryConfig;
   protected logger: Logger;
   constructor(
-    github: GitHub,
+    github: Scm,
     targetBranch: string,
     repositoryConfig: RepositoryConfig,
     logger: Logger = defaultLogger
@@ -49,6 +49,20 @@ export abstract class ManifestPlugin {
    */
   processCommits(commits: ConventionalCommit[]): ConventionalCommit[] {
     return commits;
+  }
+
+  /**
+   * Whether this plugin can make one release branch's pull request depend
+   * on another release branch's unreleased artifact (e.g. a workspace
+   * plugin with merging disabled writes a dependency requirement on a
+   * sibling's in-flight version into dependents' pull requests). When true,
+   * release branches are not independent of each other. Plugins that only
+   * synchronize version numbers across branches (e.g. linked-versions) do
+   * not create such a dependency and should return false.
+   * @returns {boolean} true if release branches are not independent
+   */
+  couplesVersionsAcrossBranches(): boolean {
+    return false;
   }
 
   /**

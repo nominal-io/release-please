@@ -24,7 +24,7 @@ import {PullRequestBody, ReleaseData} from '../util/pull-request-body';
 import {BranchName} from '../util/branch-name';
 import {Update} from '../update';
 import {mergeUpdates} from '../updaters/composite';
-import {GitHub} from '../github';
+import {Scm} from '../scm';
 
 export interface MergeOptions {
   pullRequestTitlePattern?: string;
@@ -50,7 +50,7 @@ export class Merge extends ManifestPlugin {
   private forceMerge: boolean;
 
   constructor(
-    github: GitHub,
+    github: Scm,
     targetBranch: string,
     repositoryConfig: RepositoryConfig,
     options: MergeOptions = {}
@@ -89,6 +89,7 @@ export class Merge extends ManifestPlugin {
 
     const releaseData: ReleaseData[] = [];
     const labels = new Set<string>();
+    const sourcePullRequestNumbers = new Set<number>();
     let rawUpdates: Update[] = [];
     let rootRelease: CandidateReleasePullRequest | null = null;
     for (const candidate of inScopeCandidates) {
@@ -98,6 +99,9 @@ export class Merge extends ManifestPlugin {
         labels.add(label);
       }
       releaseData.push(...pullRequest.body.releaseData);
+      for (const number of pullRequest.sourcePullRequestNumbers ?? []) {
+        sourcePullRequestNumbers.add(number);
+      }
       if (candidate.path === '.') {
         rootRelease = candidate;
       }
@@ -137,13 +141,16 @@ export class Merge extends ManifestPlugin {
         this.headBranchName ??
         BranchName.ofTargetBranch(this.targetBranch).toString(),
       draft: !candidates.some(candidate => !candidate.pullRequest.draft),
+      ...(sourcePullRequestNumbers.size
+        ? {sourcePullRequestNumbers: Array.from(sourcePullRequestNumbers)}
+        : {}),
     };
 
     const releaseTypes = new Set(
       candidates.map(candidate => candidate.config.releaseType)
     );
     const releaseType =
-      releaseTypes.size === 1 ? releaseTypes.values().next().value : 'simple';
+      releaseTypes.size === 1 ? releaseTypes.values().next().value! : 'simple';
     return [
       {
         path: ROOT_PROJECT_PATH,

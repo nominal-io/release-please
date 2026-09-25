@@ -1664,6 +1664,16 @@ describe('Manifest', () => {
             sha: 'def456',
             message: 'fix: some bugfix',
             files: [],
+            pullRequest: {
+              headBranchName: 'bugfix-branch',
+              baseBranchName: 'main',
+              number: 456,
+              title: 'fix: some bugfix',
+              body: '',
+              labels: [],
+              files: [],
+              sha: 'def456',
+            },
           },
           {
             sha: 'abc123',
@@ -1707,6 +1717,7 @@ describe('Manifest', () => {
         expect(pullRequest.headRefName).to.eql(
           'release-please--branches--main'
         );
+        expect(pullRequest.sourcePullRequestNumbers).to.eql([456]);
       });
 
       it('should honour the manifestFile argument in Manifest.fromManifest', async () => {
@@ -4155,15 +4166,18 @@ describe('Manifest', () => {
         .resolves(buildGitHubFileRaw('some-content'));
       stubSuggesterWithSnapshot(sandbox, this.test!.fullTitle());
       mockPullRequests(github, []);
-      sandbox.stub(github, 'getPullRequest').withArgs(22).resolves({
-        number: 22,
-        title: 'pr title1',
-        body: 'pr body1',
-        headBranchName: 'release-please/branches/main',
-        baseBranchName: 'main',
-        labels: [],
-        files: [],
-      });
+      sandbox
+        .stub((github as any).gitHubApi, 'getPullRequest')
+        .withArgs(22)
+        .resolves({
+          number: 22,
+          title: 'pr title1',
+          body: 'pr body1',
+          headBranchName: 'release-please/branches/main',
+          baseBranchName: 'main',
+          labels: [],
+          files: [],
+        });
       const manifest = new Manifest(
         github,
         'main',
@@ -4219,7 +4233,7 @@ describe('Manifest', () => {
         .resolves(buildGitHubFileRaw('some-content-2'));
       mockPullRequests(github, []);
       sandbox
-        .stub(github, 'getPullRequest')
+        .stub((github as any).gitHubApi, 'getPullRequest')
         .withArgs(123)
         .resolves({
           number: 123,
@@ -4340,6 +4354,463 @@ describe('Manifest', () => {
       ]);
     });
 
+    it('filters pull requests by source pull request number', async () => {
+      mockPullRequests(github, []);
+      const createPullRequestStub = sandbox
+        .stub(github, 'createPullRequest')
+        .resolves({
+          number: 124,
+          title: 'pr title2',
+          body: 'pr body2',
+          headBranchName: 'release-please/branches/main2',
+          baseBranchName: 'main',
+          labels: [],
+          files: [],
+        });
+      const manifest = new Manifest(
+        github,
+        'main',
+        {
+          'path/a': {
+            releaseType: 'node',
+            component: 'pkg1',
+          },
+          'path/b': {
+            releaseType: 'node',
+            component: 'pkg2',
+          },
+        },
+        {
+          'path/a': Version.parse('1.0.0'),
+          'path/b': Version.parse('0.2.3'),
+        },
+        {
+          separatePullRequests: true,
+          plugins: ['node-workspace'],
+        }
+      );
+      sandbox.stub(manifest, 'buildPullRequests').resolves([
+        {
+          title: PullRequestTitle.ofTargetBranch('main'),
+          body: new PullRequestBody([
+            {
+              notes: 'Some release notes',
+            },
+          ]),
+          updates: [
+            {
+              path: 'README.md',
+              createIfMissing: false,
+              updater: new RawContent('some raw content'),
+            },
+          ],
+          labels: [],
+          headRefName: 'release-please/branches/main',
+          draft: false,
+          sourcePullRequestNumbers: [123],
+        },
+        {
+          title: PullRequestTitle.ofTargetBranch('main'),
+          body: new PullRequestBody([
+            {
+              notes: 'Some release notes 2',
+            },
+          ]),
+          updates: [
+            {
+              path: 'pkg2/README.md',
+              createIfMissing: false,
+              updater: new RawContent('some raw content 2'),
+            },
+          ],
+          labels: [],
+          headRefName: 'release-please/branches/main2',
+          draft: false,
+          sourcePullRequestNumbers: [456],
+        },
+      ]);
+      const pullRequests = await manifest.createPullRequests({
+        sourcePullRequestNumber: 456,
+      });
+      sinon.assert.calledOnce(createPullRequestStub);
+      expect(createPullRequestStub.firstCall.args[0].headBranchName).to.eql(
+        'release-please/branches/main2'
+      );
+      expect(pullRequests.map(pullRequest => pullRequest!.number)).to.eql([
+        124,
+      ]);
+      expect(pullRequests[0]!.sourcePullRequestNumbers).to.eql([456]);
+    });
+
+    it('opens a release PR filtered by source PR when an unrelated group has an untagged, merged release PR', async () => {
+      const createPullRequestStub = sandbox
+        .stub(github, 'createPullRequest')
+        .resolves({
+          number: 124,
+          title: 'pr title2',
+          body: 'pr body2',
+          headBranchName: 'release-please/branches/main/components/pkg2',
+          baseBranchName: 'main',
+          labels: [],
+          files: [],
+        });
+      // pkg1's release PR is merged but not yet tagged.
+      mockPullRequests(
+        github,
+        [],
+        [
+          {
+            number: 999,
+            title: 'chore: release pkg1 1.2.3',
+            body: new PullRequestBody([{notes: 'pkg1 notes'}]).toString(),
+            headBranchName: 'release-please/branches/main/components/pkg1',
+            baseBranchName: 'main',
+            labels: ['autorelease: pending'],
+            files: [],
+          },
+        ]
+      );
+      const manifest = new Manifest(
+        github,
+        'main',
+        {
+          'path/a': {releaseType: 'node', component: 'pkg1'},
+          'path/b': {releaseType: 'node', component: 'pkg2'},
+        },
+        {
+          'path/a': Version.parse('1.0.0'),
+          'path/b': Version.parse('0.2.3'),
+        },
+        {separatePullRequests: true}
+      );
+      sandbox.stub(manifest, 'buildPullRequests').resolves([
+        {
+          title: PullRequestTitle.ofTargetBranch('main'),
+          body: new PullRequestBody([{notes: 'Some release notes 2'}]),
+          updates: [
+            {
+              path: 'pkg2/README.md',
+              createIfMissing: false,
+              updater: new RawContent('some raw content 2'),
+            },
+          ],
+          labels: [],
+          headRefName: 'release-please/branches/main/components/pkg2',
+          draft: false,
+          sourcePullRequestNumbers: [456],
+        },
+      ]);
+      const pullRequests = await manifest.createPullRequests({
+        sourcePullRequestNumber: 456,
+      });
+      sinon.assert.calledOnce(createPullRequestStub);
+      expect(pullRequests.map(pullRequest => pullRequest!.number)).to.eql([
+        124,
+      ]);
+    });
+
+    it('opens a release PR when an unrelated group has an untagged, merged release PR', async () => {
+      const createPullRequestStub = sandbox
+        .stub(github, 'createPullRequest')
+        .resolves({
+          number: 124,
+          title: 'pr title',
+          body: 'pr body',
+          headBranchName: 'release-please/branches/main/components/pkg2',
+          baseBranchName: 'main',
+          labels: [],
+          files: [],
+        });
+      // pkg1's release PR is merged but not yet tagged.
+      mockPullRequests(
+        github,
+        [],
+        [
+          {
+            number: 999,
+            title: 'chore: release pkg1 1.2.3',
+            body: new PullRequestBody([{notes: 'pkg1 notes'}]).toString(),
+            headBranchName: 'release-please/branches/main/components/pkg1',
+            baseBranchName: 'main',
+            labels: ['autorelease: pending'],
+            files: [],
+          },
+        ]
+      );
+      const manifest = new Manifest(
+        github,
+        'main',
+        {
+          'path/a': {releaseType: 'node', component: 'pkg1'},
+          'path/b': {releaseType: 'node', component: 'pkg2'},
+        },
+        {
+          'path/a': Version.parse('1.0.0'),
+          'path/b': Version.parse('0.2.3'),
+        },
+        {separatePullRequests: true}
+      );
+      sandbox.stub(manifest, 'buildPullRequests').resolves([
+        {
+          title: PullRequestTitle.ofTargetBranch('main'),
+          body: new PullRequestBody([{notes: 'Some release notes'}]),
+          updates: [
+            {
+              path: 'README.md',
+              createIfMissing: false,
+              updater: new RawContent('some raw content'),
+            },
+          ],
+          labels: [],
+          headRefName: 'release-please/branches/main/components/pkg2',
+          draft: false,
+          sourcePullRequestNumbers: [123],
+        },
+      ]);
+      const pullRequests = await manifest.createPullRequests();
+      sinon.assert.calledOnce(createPullRequestStub);
+      expect(pullRequests.map(pullRequest => pullRequest!.number)).to.eql([
+        124,
+      ]);
+    });
+
+    it('does not open a release PR for a group with an untagged, merged release PR', async () => {
+      const createPullRequestStub = sandbox.stub(github, 'createPullRequest');
+      // The same group's release PR (same branch) is merged but not yet tagged.
+      mockPullRequests(
+        github,
+        [],
+        [
+          {
+            number: 997,
+            title: 'chore: release pkg1 1.0.1',
+            body: new PullRequestBody([{notes: 'same group notes'}]).toString(),
+            headBranchName: 'release-please/branches/main/components/pkg1',
+            baseBranchName: 'main',
+            labels: ['autorelease: pending'],
+            files: [],
+          },
+        ]
+      );
+      const manifest = new Manifest(
+        github,
+        'main',
+        {
+          'path/a': {releaseType: 'node', component: 'pkg1'},
+          'path/b': {releaseType: 'node', component: 'pkg2'},
+        },
+        {
+          'path/a': Version.parse('1.0.0'),
+          'path/b': Version.parse('0.2.3'),
+        },
+        {separatePullRequests: true}
+      );
+      sandbox.stub(manifest, 'buildPullRequests').resolves([
+        {
+          title: PullRequestTitle.ofTargetBranch('main'),
+          body: new PullRequestBody([{notes: 'Some release notes'}]),
+          updates: [],
+          labels: [],
+          headRefName: 'release-please/branches/main/components/pkg1',
+          draft: false,
+          sourcePullRequestNumbers: [123],
+        },
+      ]);
+      const pullRequests = await manifest.createPullRequests();
+      expect(pullRequests).to.be.empty;
+      sinon.assert.notCalled(createPullRequestStub);
+    });
+
+    it('skips only the group with an untagged, merged release PR and opens the rest', async () => {
+      const createPullRequestStub = sandbox
+        .stub(github, 'createPullRequest')
+        .resolves({
+          number: 124,
+          title: 'pr title2',
+          body: 'pr body2',
+          headBranchName: 'release-please/branches/main/components/pkg2',
+          baseBranchName: 'main',
+          labels: [],
+          files: [],
+        });
+      // pkg1's release PR is merged but not yet tagged. Until it is tagged,
+      // buildPullRequests keeps regenerating a stale candidate for pkg1.
+      mockPullRequests(
+        github,
+        [],
+        [
+          {
+            number: 997,
+            title: 'chore: release pkg1 1.0.1',
+            body: new PullRequestBody([{notes: 'pkg1 notes'}]).toString(),
+            headBranchName: 'release-please/branches/main/components/pkg1',
+            baseBranchName: 'main',
+            labels: ['autorelease: pending'],
+            files: [],
+          },
+        ]
+      );
+      const manifest = new Manifest(
+        github,
+        'main',
+        {
+          'path/a': {releaseType: 'node', component: 'pkg1'},
+          'path/b': {releaseType: 'node', component: 'pkg2'},
+        },
+        {
+          'path/a': Version.parse('1.0.0'),
+          'path/b': Version.parse('0.2.3'),
+        },
+        {separatePullRequests: true}
+      );
+      sandbox.stub(manifest, 'buildPullRequests').resolves([
+        {
+          title: PullRequestTitle.ofTargetBranch('main'),
+          body: new PullRequestBody([{notes: 'pkg1 stale notes'}]),
+          updates: [],
+          labels: [],
+          headRefName: 'release-please/branches/main/components/pkg1',
+          draft: false,
+        },
+        {
+          title: PullRequestTitle.ofTargetBranch('main'),
+          body: new PullRequestBody([{notes: 'pkg2 release notes'}]),
+          updates: [],
+          labels: [],
+          headRefName: 'release-please/branches/main/components/pkg2',
+          draft: false,
+        },
+      ]);
+      const pullRequests = await manifest.createPullRequests();
+      sinon.assert.calledOnce(createPullRequestStub);
+      expect(createPullRequestStub.firstCall.args[0].headBranchName).to.eql(
+        'release-please/branches/main/components/pkg2'
+      );
+      expect(pullRequests.map(pullRequest => pullRequest!.number)).to.eql([
+        124,
+      ]);
+    });
+
+    it('does not open any release PRs when a plugin couples versions across branches', async () => {
+      const createPullRequestStub = sandbox.stub(github, 'createPullRequest');
+      // pkg1's release PR is merged but not yet tagged. With merging
+      // disabled, node-workspace can write pkg1's in-flight version into
+      // pkg2's release PR, so no release PR is safe to open.
+      mockPullRequests(
+        github,
+        [],
+        [
+          {
+            number: 997,
+            title: 'chore: release pkg1 1.0.1',
+            body: new PullRequestBody([{notes: 'pkg1 notes'}]).toString(),
+            headBranchName: 'release-please/branches/main/components/pkg1',
+            baseBranchName: 'main',
+            labels: ['autorelease: pending'],
+            files: [],
+          },
+        ]
+      );
+      const manifest = new Manifest(
+        github,
+        'main',
+        {
+          'path/a': {releaseType: 'node', component: 'pkg1'},
+          'path/b': {releaseType: 'node', component: 'pkg2'},
+        },
+        {
+          'path/a': Version.parse('1.0.0'),
+          'path/b': Version.parse('0.2.3'),
+        },
+        // With separatePullRequests, node-workspace defaults to merge: false.
+        {separatePullRequests: true, plugins: ['node-workspace']}
+      );
+      sandbox.stub(manifest, 'buildPullRequests').resolves([
+        {
+          title: PullRequestTitle.ofTargetBranch('main'),
+          body: new PullRequestBody([{notes: 'pkg2 release notes'}]),
+          updates: [],
+          labels: [],
+          headRefName: 'release-please/branches/main/components/pkg2',
+          draft: false,
+        },
+      ]);
+      const pullRequests = await manifest.createPullRequests();
+      expect(pullRequests).to.be.empty;
+      sinon.assert.notCalled(createPullRequestStub);
+    });
+
+    it('opens a release PR for a linked-versions group member when another member has an untagged, merged release PR', async () => {
+      const createPullRequestStub = sandbox
+        .stub(github, 'createPullRequest')
+        .resolves({
+          number: 124,
+          title: 'pr title',
+          body: 'pr body',
+          headBranchName: 'release-please/branches/main/components/pkg2',
+          baseBranchName: 'main',
+          labels: [],
+          files: [],
+        });
+      // pkg1's release PR is merged but not yet tagged. linked-versions
+      // only synchronizes version numbers across the group's branches; it
+      // does not make pkg2's release depend on pkg1's unreleased artifact,
+      // so pkg2's release PR may proceed.
+      mockPullRequests(
+        github,
+        [],
+        [
+          {
+            number: 999,
+            title: 'chore: release pkg1 1.0.1',
+            body: new PullRequestBody([{notes: 'pkg1 notes'}]).toString(),
+            headBranchName: 'release-please/branches/main/components/pkg1',
+            baseBranchName: 'main',
+            labels: ['autorelease: pending'],
+            files: [],
+          },
+        ]
+      );
+      const manifest = new Manifest(
+        github,
+        'main',
+        {
+          'path/a': {releaseType: 'node', component: 'pkg1'},
+          'path/b': {releaseType: 'node', component: 'pkg2'},
+        },
+        {
+          'path/a': Version.parse('1.0.0'),
+          'path/b': Version.parse('1.0.0'),
+        },
+        {
+          separatePullRequests: true,
+          plugins: [
+            {
+              type: 'linked-versions',
+              groupName: 'group',
+              components: ['pkg1', 'pkg2'],
+              merge: false,
+            },
+          ],
+        }
+      );
+      sandbox.stub(manifest, 'buildPullRequests').resolves([
+        {
+          title: PullRequestTitle.ofTargetBranch('main'),
+          body: new PullRequestBody([{notes: 'pkg2 release notes'}]),
+          updates: [],
+          labels: [],
+          headRefName: 'release-please/branches/main/components/pkg2',
+          draft: false,
+        },
+      ]);
+      const pullRequests = await manifest.createPullRequests();
+      sinon.assert.calledOnce(createPullRequestStub);
+      expect(pullRequests.map(pullRequest => pullRequest!.number)).to.eql([
+        124,
+      ]);
+    });
+
     it('handles signoff users', async function () {
       sandbox
         .stub(github, 'getFileContentsOnBranch')
@@ -4347,15 +4818,18 @@ describe('Manifest', () => {
         .resolves(buildGitHubFileRaw('some-content'));
       stubSuggesterWithSnapshot(sandbox, this.test!.fullTitle());
       mockPullRequests(github, []);
-      sandbox.stub(github, 'getPullRequest').withArgs(22).resolves({
-        number: 22,
-        title: 'pr title1',
-        body: 'pr body1',
-        headBranchName: 'release-please/branches/main',
-        baseBranchName: 'main',
-        labels: [],
-        files: [],
-      });
+      sandbox
+        .stub((github as any).gitHubApi, 'getPullRequest')
+        .withArgs(22)
+        .resolves({
+          number: 22,
+          title: 'pr title1',
+          body: 'pr body1',
+          headBranchName: 'release-please/branches/main',
+          baseBranchName: 'main',
+          labels: [],
+          files: [],
+        });
       const manifest = new Manifest(
         github,
         'main',
@@ -4410,15 +4884,18 @@ describe('Manifest', () => {
         .resolves(buildGitHubFileRaw('some-content'));
       stubSuggesterWithSnapshot(sandbox, this.test!.fullTitle());
       mockPullRequests(github, []);
-      sandbox.stub(github, 'getPullRequest').withArgs(22).resolves({
-        number: 22,
-        title: 'pr title1',
-        body: 'pr body1',
-        headBranchName: 'release-please/branches/main',
-        baseBranchName: 'main',
-        labels: [],
-        files: [],
-      });
+      sandbox
+        .stub((github as any).gitHubApi, 'getPullRequest')
+        .withArgs(22)
+        .resolves({
+          number: 22,
+          title: 'pr title1',
+          body: 'pr body1',
+          headBranchName: 'release-please/branches/main',
+          baseBranchName: 'main',
+          labels: [],
+          files: [],
+        });
       const manifest = new Manifest(
         github,
         'main',
@@ -5094,6 +5571,119 @@ describe('Manifest', () => {
   });
 
   describe('buildReleases', () => {
+    it('should recover if a merged release pull request lacks a candidate release tag', async () => {
+      mockPullRequests(
+        github,
+        [],
+        [
+          {
+            headBranchName: 'release-please/branches/main',
+            baseBranchName: 'main',
+            number: 1234,
+            title: 'chore: release main',
+            body: pullRequestBody('release-notes/multiple.txt').replace(
+              '@google-automations/bot-config-utils',
+              'pkg-a'
+            ),
+            labels: ['autorelease: pending'],
+            files: [
+              'packages/bot-config-utils/package.json',
+              'packages/label-utils/package.json',
+            ],
+            sha: 'abc123',
+          },
+        ]
+      );
+      const manifest = new Manifest(
+        github,
+        'main',
+        {
+          'packages/bot-config-utils': {
+            releaseType: 'simple',
+            component: 'pkg-a',
+            includeComponentInTag: false,
+          },
+          'packages/label-utils': {
+            releaseType: 'simple',
+            component: '@google-automations/label-utils',
+          },
+        },
+        {
+          'packages/bot-config-utils': Version.parse('3.1.4'),
+          'packages/label-utils': Version.parse('1.0.1'),
+        }
+      );
+
+      const releases = await manifest.buildReleases();
+      expect(releases.map(release => release.path)).to.eql([
+        'packages/label-utils',
+        'packages/bot-config-utils',
+      ]);
+      expect(releases[0].tag.toString()).to.eql(
+        '@google-automations/label-utils-v1.1.0'
+      );
+      expect(releases[1].tag.toString()).to.eql('v3.2.0');
+      expect(releases[1].name).to.eql('v3.2.0');
+      expect(releases[1].sha).to.eql('abc123');
+      expect(releases[1].notes)
+        .to.be.a('string')
+        .and.satisfy((msg: string) => msg.startsWith('### Features'));
+    });
+
+    it('should match release data by component, not config path', async () => {
+      mockPullRequests(
+        github,
+        [],
+        [
+          {
+            headBranchName: 'release-please/branches/main',
+            baseBranchName: 'main',
+            number: 1234,
+            title: 'chore: release main',
+            body: pullRequestBody('release-notes/multiple.txt').replace(
+              '@google-automations/bot-config-utils',
+              'pkg-a'
+            ),
+            labels: ['autorelease: pending'],
+            files: [
+              'packages/bot-config-utils/package.json',
+              'packages/label-utils/package.json',
+            ],
+            sha: 'abc123',
+          },
+        ]
+      );
+      const manifest = new Manifest(
+        github,
+        'main',
+        {
+          'pkg-a': {
+            releaseType: 'simple',
+            component: 'pkg-b',
+          },
+          'packages/bot-config-utils': {
+            releaseType: 'simple',
+            component: 'pkg-a',
+          },
+          'packages/label-utils': {
+            releaseType: 'simple',
+            component: '@google-automations/label-utils',
+          },
+        },
+        {
+          'pkg-a': Version.parse('3.1.4'),
+          'packages/bot-config-utils': Version.parse('3.1.4'),
+          'packages/label-utils': Version.parse('1.0.1'),
+        }
+      );
+
+      const releases = await manifest.buildReleases();
+      expect(releases.map(release => release.path)).to.eql([
+        'packages/bot-config-utils',
+        'packages/label-utils',
+      ]);
+    });
+
     it('should handle a single manifest release', async () => {
       mockPullRequests(
         github,
@@ -5554,6 +6144,56 @@ describe('Manifest', () => {
       expect(releases).lengthOf(1);
       expect(releases[0].name).to.eql('release-brancher: v1.3.1');
       expect(releases[0].draft).to.be.true;
+      expect(releases[0].prerelease).to.be.undefined;
+    });
+
+    it('should build draft releases with forced tag', async () => {
+      mockPullRequests(
+        github,
+        [],
+        [
+          {
+            headBranchName: 'release-please/branches/main',
+            baseBranchName: 'main',
+            number: 1234,
+            title: 'chore: release main',
+            body: pullRequestBody('release-notes/single-manifest.txt'),
+            labels: ['autorelease: pending'],
+            files: [],
+            sha: 'abc123',
+          },
+        ]
+      );
+      const getFileContentsStub = sandbox.stub(
+        github,
+        'getFileContentsOnBranch'
+      );
+      getFileContentsStub
+        .withArgs('package.json', 'main')
+        .resolves(
+          buildGitHubFileRaw(
+            JSON.stringify({name: '@google-cloud/release-brancher'})
+          )
+        );
+      const manifest = new Manifest(
+        github,
+        'main',
+        {
+          '.': {
+            releaseType: 'node',
+            draft: true,
+            forceTag: true,
+          },
+        },
+        {
+          '.': Version.parse('1.3.1'),
+        }
+      );
+      const releases = await manifest.buildReleases();
+      expect(releases).lengthOf(1);
+      expect(releases[0].name).to.eql('release-brancher: v1.3.1');
+      expect(releases[0].draft).to.be.true;
+      expect(releases[0].forceTag).to.be.true;
       expect(releases[0].prerelease).to.be.undefined;
     });
 
@@ -6611,6 +7251,86 @@ describe('Manifest', () => {
       sinon.assert.calledOnceWithExactly(githubReleaseStub, sinon.match.any, {
         draft: true,
         prerelease: undefined,
+        forceTag: undefined,
+      } as ReleaseOptions);
+      sinon.assert.calledOnce(commentStub);
+      sinon.assert.calledOnceWithExactly(
+        addLabelsStub,
+        ['autorelease: tagged'],
+        1234
+      );
+      sinon.assert.calledOnceWithExactly(
+        removeLabelsStub,
+        ['autorelease: pending'],
+        1234
+      );
+    });
+
+    it('should create a draft release with forced tag', async () => {
+      mockPullRequests(
+        github,
+        [],
+        [
+          {
+            headBranchName: 'release-please/branches/main',
+            baseBranchName: 'main',
+            number: 1234,
+            title: 'chore: release main',
+            body: pullRequestBody('release-notes/single-manifest.txt'),
+            labels: ['autorelease: pending'],
+            files: [],
+            sha: 'abc123',
+          },
+        ]
+      );
+      const getFileContentsStub = sandbox.stub(
+        github,
+        'getFileContentsOnBranch'
+      );
+      getFileContentsStub
+        .withArgs('package.json', 'main')
+        .resolves(
+          buildGitHubFileRaw(
+            JSON.stringify({name: '@google-cloud/release-brancher'})
+          )
+        );
+      const githubReleaseStub = mockCreateRelease(github, [
+        {
+          id: 123456,
+          sha: 'abc123',
+          tagName: 'release-brancher-v1.3.1',
+          draft: true,
+        },
+      ]);
+      const commentStub = sandbox.stub(github, 'commentOnIssue').resolves();
+      const addLabelsStub = sandbox.stub(github, 'addIssueLabels').resolves();
+      const removeLabelsStub = sandbox
+        .stub(github, 'removeIssueLabels')
+        .resolves();
+      const manifest = new Manifest(
+        github,
+        'main',
+        {
+          '.': {
+            releaseType: 'node',
+            draft: true,
+            forceTag: true,
+          },
+        },
+        {
+          '.': Version.parse('1.3.1'),
+        }
+      );
+      const releases = await manifest.createReleases();
+      expect(releases).lengthOf(1);
+      expect(releases[0]!.tagName).to.eql('release-brancher-v1.3.1');
+      expect(releases[0]!.sha).to.eql('abc123');
+      expect(releases[0]!.notes).to.eql('some release notes');
+      expect(releases[0]!.draft).to.be.true;
+      sinon.assert.calledOnceWithExactly(githubReleaseStub, sinon.match.any, {
+        draft: true,
+        prerelease: undefined,
+        forceTag: true,
       } as ReleaseOptions);
       sinon.assert.calledOnce(commentStub);
       sinon.assert.calledOnceWithExactly(
@@ -6690,6 +7410,7 @@ describe('Manifest', () => {
       sinon.assert.calledOnceWithExactly(githubReleaseStub, sinon.match.any, {
         draft: undefined,
         prerelease: true,
+        forceTag: undefined,
       } as ReleaseOptions);
       sinon.assert.calledOnce(commentStub);
       sinon.assert.calledOnceWithExactly(
@@ -6767,6 +7488,7 @@ describe('Manifest', () => {
       sinon.assert.calledOnceWithExactly(githubReleaseStub, sinon.match.any, {
         draft: undefined,
         prerelease: false,
+        forceTag: undefined,
       } as ReleaseOptions);
       sinon.assert.calledOnce(commentStub);
       sinon.assert.calledOnceWithExactly(

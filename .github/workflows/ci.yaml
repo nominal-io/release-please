@@ -5,6 +5,10 @@ on:
   pull_request:
   merge_group:
 name: ci
+
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -17,16 +21,25 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
       - run: node --version
+      - run: npm ci
+      - run: npm test
+        env:
+          MOCHA_THROW_DEPRECATION: false
+  installation-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [20]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: node --version
       # The first installation step ensures that all of our production
       # dependencies work on the given Node.js version, this helps us find
       # dependencies that don't match our engines field:
       - run: npm install --omit=dev --engine-strict --ignore-scripts --no-package-lock
-      # Clean up the production install, before installing dev/production:
-      - run: rm -rf node_modules
-      - run: npm install
-      - run: npm test
-        env:
-          MOCHA_THROW_DEPRECATION: false
   bazel-integration:
     runs-on: ubuntu-latest
     timeout-minutes: 8
@@ -41,7 +54,7 @@ jobs:
           curl --fail --location --retry 3 https://releases.bazel.build/7.6.1/release/bazel-7.6.1-linux-x86_64 -o "$RUNNER_TEMP/bazel-bin/bazel"
           chmod +x "$RUNNER_TEMP/bazel-bin/bazel"
           echo "$RUNNER_TEMP/bazel-bin" >> "$GITHUB_PATH"
-      - run: npm install
+      - run: npm ci
       - run: npx mocha build/test/util/bazel-query-integration.js
         env:
           BAZEL_INTEGRATION_TEST: '1'
@@ -53,7 +66,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - run: npm install
+      - run: npm ci
       - run: npm test
         env:
           MOCHA_THROW_DEPRECATION: false
@@ -64,7 +77,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - run: npm install
+      - run: npm ci
       - run: npm run lint
   docs:
     runs-on: ubuntu-latest
@@ -73,7 +86,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - run: npm install
+      - run: npm ci
       - run: npm run docs
       - uses: JustinBeckwith/linkinator-action@v1
         with:

@@ -23,7 +23,7 @@ export {
 } from './manifest';
 export {ReleasePullRequest} from './release-pull-request';
 export {PullRequest} from './pull-request';
-export {Commit, ConventionalCommit} from './commit';
+export {Commit, CommitAuthor, ConventionalCommit} from './commit';
 export {Strategy} from './strategy';
 export {BaseStrategyOptions, BuildUpdatesOptions} from './strategies/base';
 export {
@@ -63,5 +63,5 @@ export const configSchema = require('../../schemas/config.json');
 export const manifestSchema = require('../../schemas/manifest.json');
 
 // x-release-please-start-version
-export const VERSION = '18.2.0';
+export const VERSION = '18.2.2';
 // x-release-please-end

@@ -4,6 +4,22 @@
 
 [1]: https://www.npmjs.com/package/release-please?activeTab=versions
 
+## [18.2.2](https://github.com/nominal-io/release-please/compare/v18.2.1...v18.2.2) (2026-07-22)
+
+
+### Bug Fixes
+
+* **manifest:** fail when release data lacks candidate ([#18](https://github.com/nominal-io/release-please/issues/18)) ([46a5109](https://github.com/nominal-io/release-please/commit/46a5109105713072cf393f20697a9e26877b147f))
+* **manifest:** scope untagged-merged guard to affected release branches ([#21](https://github.com/nominal-io/release-please/issues/21)) ([c682692](https://github.com/nominal-io/release-please/commit/c68269233922a72561170043e169d2443d486612))
+
+## [18.2.1](https://github.com/nominal-io/release-please/compare/v18.2.0...v18.2.1) (2026-05-07)
+
+
+### Bug Fixes
+
+* add Apache 2.0 license and NOTICE file ([#14](https://github.com/nominal-io/release-please/issues/14)) ([ef7f984](https://github.com/nominal-io/release-please/commit/ef7f98457affbcf99a09792aed91d9ac55731a43))
+* **manifest:** filter release prs by source pr ([#15](https://github.com/nominal-io/release-please/issues/15)) ([93f2db3](https://github.com/nominal-io/release-please/commit/93f2db358c77dcd95925be74d47a035a08214067))
+
 ## [18.2.0](https://github.com/nominal-io/release-please/compare/v18.1.1...v18.2.0) (2026-01-09)
 
 

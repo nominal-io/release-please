@@ -185,5 +185,22 @@ describe('Merge plugin', () => {
       ]);
       snapshot(dateSafe(candidate.pullRequest.body.toString()));
     });
+
+    it('merges source pull request numbers for pull requests', async () => {
+      const candidates: CandidateReleasePullRequest[] = [
+        buildMockCandidatePullRequest('python', 'python', '1.0.0', {
+          sourcePullRequestNumbers: [123, 124],
+        }),
+        buildMockCandidatePullRequest('node', 'node', '3.3.4', {
+          sourcePullRequestNumbers: [124, 125],
+        }),
+      ];
+      const plugin = new Merge(github, 'main', {});
+      const newCandidates = await plugin.run(candidates);
+      expect(newCandidates).lengthOf(1);
+      expect(newCandidates[0].pullRequest.sourcePullRequestNumbers).to.eql([
+        123, 124, 125,
+      ]);
+    });
   });
 });
