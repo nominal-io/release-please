@@ -16,9 +16,6 @@ import {describe, it, afterEach} from 'mocha';
 import * as childProcess from 'child_process';
 import * as sinon from 'sinon';
 import {expect} from 'chai';
-import {chmodSync, mkdtempSync, rmSync, writeFileSync} from 'fs';
-import {tmpdir} from 'os';
-import {delimiter, join} from 'path';
 import {
   parseBazelQueryOutput,
   resolveBazelQuery,
@@ -219,6 +216,29 @@ describe('runBazelQuery execution', () => {
     sinon.assert.calledWithMatch(logger.info, 'additional paths');
   });
 
+  it('handles output larger than the default process buffer', () => {
+    const execute = childProcess.execFileSync;
+    sandbox
+      .stub(childProcess, 'execFileSync')
+      .callsFake((file, args, options) => {
+        expect(file).to.equal('bazel');
+        expect(args).to.deep.equal([
+          'query',
+          "filter('^//', deps(//apps/my-app))",
+        ]);
+        // Use a real child process without requiring a platform-specific executable.
+        return execute(
+          process.execPath,
+          [
+            '-e',
+            "process.stdout.write('//libs/my-lib:target\\n'.repeat(70000));",
+          ],
+          options
+        );
+      });
+    expect(runBazelQuery('deps(//apps/my-app)')).to.deep.equal(['libs/my-lib']);
+  });
+
   it('returns no paths for an empty query result without a logger', () => {
     sandbox.stub(childProcess, 'execFileSync').returns('');
     expect(runBazelQuery('deps(//apps/app)')).to.deep.equal([]);
@@ -265,30 +285,5 @@ describe('runBazelQuery execution', () => {
       .stub(childProcess, 'execFileSync')
       .throws(new Error('query failed'));
     expect(() => runBazelQuery('deps(//apps/app)')).to.throw('query failed');
-  });
-});
-
-describe('runBazelQuery', () => {
-  it('handles output larger than Node’s default process buffer', () => {
-    const directory = mkdtempSync(join(tmpdir(), 'release-please-bazel-'));
-    const bazel = join(directory, 'bazel');
-    const expectedQuery = "filter('^//', deps(//apps/my-app))";
-    writeFileSync(
-      bazel,
-      `#!${process.execPath}\nif (process.argv[3] !== ${JSON.stringify(
-        expectedQuery
-      )}) process.exit(2);\nprocess.stdout.write('//libs/my-lib:target\\n'.repeat(70000));\n`
-    );
-    chmodSync(bazel, 0o755);
-    const originalPath = process.env.PATH;
-    process.env.PATH = `${directory}${delimiter}${originalPath || ''}`;
-    try {
-      expect(runBazelQuery('deps(//apps/my-app)')).to.deep.equal([
-        'libs/my-lib',
-      ]);
-    } finally {
-      process.env.PATH = originalPath;
-      rmSync(directory, {recursive: true, force: true});
-    }
   });
 });
