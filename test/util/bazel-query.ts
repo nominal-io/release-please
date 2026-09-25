@@ -152,9 +152,12 @@ describe('runBazelQuery', () => {
   it('handles output larger than Node’s default process buffer', () => {
     const directory = mkdtempSync(join(tmpdir(), 'release-please-bazel-'));
     const bazel = join(directory, 'bazel');
+    const expectedQuery = "filter('^//', deps(//apps/my-app))";
     writeFileSync(
       bazel,
-      `#!${process.execPath}\nprocess.stdout.write('//libs/my-lib:target\\n'.repeat(70000));\n`
+      `#!${process.execPath}\nif (process.argv[3] !== ${JSON.stringify(
+        expectedQuery
+      )}) process.exit(2);\nprocess.stdout.write('//libs/my-lib:target\\n'.repeat(70000));\n`
     );
     chmodSync(bazel, 0o755);
     const originalPath = process.env.PATH;
