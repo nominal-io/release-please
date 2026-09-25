@@ -216,6 +216,29 @@ describe('runBazelQuery execution', () => {
     sinon.assert.calledWithMatch(logger.info, 'additional paths');
   });
 
+  it('handles output larger than the default process buffer', () => {
+    const execute = childProcess.execFileSync;
+    sandbox
+      .stub(childProcess, 'execFileSync')
+      .callsFake((file, args, options) => {
+        expect(file).to.equal('bazel');
+        expect(args).to.deep.equal([
+          'query',
+          "filter('^//', deps(//apps/my-app))",
+        ]);
+        // Use a real child process without requiring a platform-specific executable.
+        return execute(
+          process.execPath,
+          [
+            '-e',
+            "process.stdout.write('//libs/my-lib:target\\n'.repeat(70000));",
+          ],
+          options
+        );
+      });
+    expect(runBazelQuery('deps(//apps/my-app)')).to.deep.equal(['libs/my-lib']);
+  });
+
   it('returns no paths for an empty query result without a logger', () => {
     sandbox.stub(childProcess, 'execFileSync').returns('');
     expect(runBazelQuery('deps(//apps/app)')).to.deep.equal([]);

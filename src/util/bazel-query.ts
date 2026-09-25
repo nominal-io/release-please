@@ -147,12 +147,16 @@ export function runBazelQuery(
   excludePath?: string,
   logger?: Logger
 ): string[] {
-  logger?.info(`Running bazel deps query: bazel query '${queryExpression}'`);
+  const localQueryExpression = `filter('^//', ${queryExpression})`;
+  logger?.info(
+    `Running bazel deps query: bazel query '${localQueryExpression}'`
+  );
 
   try {
-    const output = execFileSync('bazel', ['query', queryExpression], {
+    const output = execFileSync('bazel', ['query', localQueryExpression], {
       encoding: 'utf-8',
       timeout: 120000, // 2 minute timeout
+      maxBuffer: 64 * 1024 * 1024,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
