@@ -678,7 +678,8 @@ export class Manifest {
     for (const [path, config] of Object.entries(this.repositoryConfig)) {
       const staticPaths = config.additionalPaths || [];
       let bazelPaths: string[] = [];
-      if (config.bazelDepsQuery) {
+      // Root packages already receive all commits and need no dependency query.
+      if (config.bazelDepsQuery && path !== ROOT_PROJECT_PATH) {
         const queryExpression = resolveBazelQuery(config.bazelDepsQuery, path);
         bazelPaths = runBazelQuery(queryExpression, path, this.logger);
         this.logger.info(

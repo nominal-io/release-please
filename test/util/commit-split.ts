@@ -76,6 +76,27 @@ describe('CommitSplit', () => {
     expect(splitCommits['core']).lengthOf(1);
     expect(splitCommits['core/subpackage']).lengthOf(1);
   });
+  it('matches additional files exactly without matching filename prefixes', () => {
+    const dependencyCommit = {
+      sha: 'dependency',
+      message: 'fix: dependency',
+      files: ['config.json', 'shared/config.json'],
+    };
+    const unrelatedCommit = {
+      sha: 'unrelated',
+      message: 'fix: unrelated',
+      files: [
+        'config.json.backup',
+        'shared/config.json.backup',
+        'shared/other.json',
+      ],
+    };
+    const split = new CommitSplit({
+      packagePaths: {app: ['config.json', 'shared/config.json']},
+    }).split([dependencyCommit, unrelatedCommit]);
+    expect(split.app).to.deep.equal([dependencyCommit]);
+  });
+
   describe('including empty commits', () => {
     it('should separate commits', () => {
       const commitSplit = new CommitSplit({

@@ -25,6 +25,7 @@ import {Logger} from './logger';
  * This function:
  * 1. Filters out external dependencies (lines starting with `@`)
  * 2. Extracts the package path from local targets (`//path/to/package:target` -> `path/to/package`)
+ *    Root-package targets retain their target name to track source files.
  * 3. Deduplicates paths
  * 4. Optionally excludes a given path (e.g., the package's own path)
  *
@@ -48,14 +49,16 @@ export function parseBazelQueryOutput(
     }
 
     // Match local targets: //path/to/package:target or //path/to/package
-    const match = trimmed.match(/^\/\/([^:]*)/);
+    const match = trimmed.match(/^\/\/([^:]*)(?::(.+))?$/);
     if (!match) {
       continue;
     }
 
-    const packagePath = match[1];
+    // Root-package source labels include the file path after the colon.
+    // Preserve it instead of dropping the dependency or tracking the whole repo.
+    const packagePath = match[1] || match[2];
 
-    // Skip empty paths (e.g., //:target refers to the root)
+    // Skip labels without a package or target path.
     if (!packagePath) {
       continue;
     }

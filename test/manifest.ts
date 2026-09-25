@@ -3795,6 +3795,58 @@ describe('Manifest', () => {
       });
     });
 
+    it('should release the root package without running a bazel query', async () => {
+      mockReleases(sandbox, github, []);
+      mockTags(sandbox, github, []);
+      mockCommits(sandbox, github, [
+        {sha: 'abc123', message: 'fix: root config', files: ['config.json']},
+      ]);
+      const bazelQueryModule = await import('../src/util/bazel-query');
+      const query = sandbox
+        .stub(bazelQueryModule, 'runBazelQuery')
+        .throws(new Error('Root packages must not query Bazel'));
+      const manifest = new Manifest(
+        github,
+        'main',
+        {
+          '.': {releaseType: 'simple', bazelDepsQuery: true},
+        },
+        {}
+      );
+      const pullRequests = await manifest.buildPullRequests();
+      expect(pullRequests).lengthOf(1);
+      sinon.assert.notCalled(query);
+    });
+
+    for (const file of ['config.json', 'shared/config.json']) {
+      it(`should release a package when its root-package dependency ${file} changes`, async () => {
+        mockReleases(sandbox, github, []);
+        mockTags(sandbox, github, []);
+        mockCommits(sandbox, github, [
+          {sha: 'abc123', message: 'fix: shared config', files: [file]},
+        ]);
+        const bazelQueryModule = await import('../src/util/bazel-query');
+        sandbox
+          .stub(bazelQueryModule, 'runBazelQuery')
+          .returns(
+            bazelQueryModule.parseBazelQueryOutput(
+              `//apps/my-app:my-app\n//:${file}`,
+              'apps/my-app'
+            )
+          );
+        const manifest = new Manifest(
+          github,
+          'main',
+          {
+            'apps/my-app': {releaseType: 'simple', bazelDepsQuery: true},
+          },
+          {}
+        );
+        const pullRequests = await manifest.buildPullRequests();
+        expect(pullRequests).lengthOf(1);
+      });
+    }
+
     it('should update manifest for commits resolved by bazel-deps-query', async () => {
       mockReleases(sandbox, github, []);
       mockTags(sandbox, github, [

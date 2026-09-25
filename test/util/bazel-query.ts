@@ -96,11 +96,19 @@ describe('parseBazelQueryOutput', () => {
     expect(paths).to.deep.equal(['libs/my-lib', 'libs/other-lib']);
   });
 
-  it('should skip root-level targets', () => {
-    const output = ['//:root-target', '//libs/my-lib:my-lib'].join('\n');
+  it('should preserve root-package dependency paths', () => {
+    const output = [
+      '//:config.json',
+      '//:shared/config.json',
+      '//libs/my-lib:my-lib',
+    ].join('\n');
 
     const paths = parseBazelQueryOutput(output);
-    expect(paths).to.deep.equal(['libs/my-lib']);
+    expect(paths).to.deep.equal([
+      'config.json',
+      'libs/my-lib',
+      'shared/config.json',
+    ]);
   });
 
   it('should handle deeply nested paths', () => {
