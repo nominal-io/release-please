@@ -12,11 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {describe, it} from 'mocha';
+import {describe, it, afterEach} from 'mocha';
+import * as childProcess from 'child_process';
+import * as sinon from 'sinon';
 import {expect} from 'chai';
 import {
   parseBazelQueryOutput,
   resolveBazelQuery,
+  runBazelQuery,
 } from '../../src/util/bazel-query';
 
 describe('parseBazelQueryOutput', () => {
@@ -78,6 +81,12 @@ describe('parseBazelQueryOutput', () => {
     expect(paths).to.deep.equal(['libs/my-lib', 'libs/other-lib']);
   });
 
+  it('ignores malformed output and normalizes trailing package slashes', () => {
+    expect(
+      parseBazelQueryOutput('not a label\n//\n///\n//libs/shared/:target')
+    ).to.deep.equal(['libs/shared']);
+  });
+
   it('should handle empty output', () => {
     const paths = parseBazelQueryOutput('');
     expect(paths).to.deep.equal([]);
@@ -133,6 +142,22 @@ describe('parseBazelQueryOutput', () => {
 });
 
 describe('resolveBazelQuery', () => {
+  it('disables queries when configured false', () => {
+    expect(resolveBazelQuery(false, 'apps/app')).to.equal('');
+  });
+
+  for (const command of [
+    '  bazel query "deps(//apps/app)"  ',
+    'bazel query deps(//apps/app)',
+    '  deps(//apps/app)  ',
+  ]) {
+    it(`resolves ${command}`, () => {
+      expect(resolveBazelQuery(command, 'apps/app')).to.equal(
+        'deps(//apps/app)'
+      );
+    });
+  }
+
   it('should build default query expression when enabled', () => {
     const expr = resolveBazelQuery(true, 'apps/my-app');
     expect(expr).to.equal('deps(//apps/my-app)');
@@ -149,5 +174,93 @@ describe('resolveBazelQuery', () => {
       'apps/my-app'
     );
     expect(expr).to.equal('deps(//apps/my-app)');
+  });
+});
+
+describe('runBazelQuery execution', () => {
+  const sandbox = sinon.createSandbox();
+  afterEach(() => sandbox.restore());
+
+  it('executes without a shell and returns only relevant dependency paths', () => {
+    const execute = sandbox
+      .stub(childProcess, 'execFileSync')
+      .returns(
+        '//apps/app:app\n//libs/shared:shared\n//libs/shared:source\n@external//:dep\n//:config.json\n'
+      );
+    const logger = {
+      info: sandbox.stub(),
+      error: sandbox.stub(),
+      warn: sandbox.stub(),
+      debug: sandbox.stub(),
+      trace: sandbox.stub(),
+    };
+    expect(runBazelQuery('deps(//apps/app)', 'apps/app', logger)).to.deep.equal(
+      ['config.json', 'libs/shared']
+    );
+    sinon.assert.calledOnceWithMatch(
+      execute,
+      'bazel',
+      sinon.match(
+        (args: string[]) =>
+          args.length === 2 &&
+          args[0] === 'query' &&
+          args[1].includes('deps(//apps/app)')
+      ),
+      {
+        encoding: 'utf-8',
+        timeout: 120000,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      }
+    );
+    expect(execute.firstCall.args[2]).not.to.have.property('shell', true);
+    sinon.assert.calledWithMatch(logger.info, 'additional paths');
+  });
+
+  it('returns no paths for an empty query result without a logger', () => {
+    sandbox.stub(childProcess, 'execFileSync').returns('');
+    expect(runBazelQuery('deps(//apps/app)')).to.deep.equal([]);
+  });
+
+  for (const failure of [
+    {name: 'missing Bazel', message: 'spawnSync bazel ENOENT', code: 'ENOENT'},
+    {name: 'timeout', message: 'spawnSync bazel ETIMEDOUT', code: 'ETIMEDOUT'},
+    {
+      name: 'nonzero exit',
+      message: 'Command failed: bazel query',
+      stderr: 'ERROR: no such target',
+    },
+  ]) {
+    it(`propagates ${failure.name} with query context and logs diagnostics`, () => {
+      const error = Object.assign(new Error(failure.message), failure);
+      sandbox.stub(childProcess, 'execFileSync').throws(error);
+      const logger = {
+        info: sandbox.stub(),
+        error: sandbox.stub(),
+        warn: sandbox.stub(),
+        debug: sandbox.stub(),
+        trace: sandbox.stub(),
+      };
+      expect(() =>
+        runBazelQuery('deps(//apps/app)', undefined, logger)
+      ).to.throw(
+        `Failed to execute bazel-deps-query "deps(//apps/app)": ${failure.message}`
+      );
+      sinon.assert.calledWithMatch(logger.error, failure.message);
+      if (failure.stderr) {
+        sinon.assert.calledWithExactly(
+          logger.error,
+          `stderr: ${failure.stderr}`
+        );
+      } else {
+        sinon.assert.calledOnce(logger.error);
+      }
+    });
+  }
+
+  it('propagates errors without requiring a logger', () => {
+    sandbox
+      .stub(childProcess, 'execFileSync')
+      .throws(new Error('query failed'));
+    expect(() => runBazelQuery('deps(//apps/app)')).to.throw('query failed');
   });
 });

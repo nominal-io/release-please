@@ -55,6 +55,18 @@ accept your pull requests.
 
         npm run fix
 
+### Bazel integration tests
+
+The unit tests do not require Bazel. To run the workspace integration tests,
+install Bazel 7.6.1 (or Bazelisk), then run:
+
+```bash
+npm run compile
+BAZEL_INTEGRATION_TEST=1 npx mocha build/test/util/bazel-query-integration.js
+```
+
+CI runs these tests in the `bazel-integration` job with Bazel 7.6.1.
+
 ## Testing a new feature using CLI
 
 1. After you've written some new code, in order to test it out, you can use the [CLI][CLI].

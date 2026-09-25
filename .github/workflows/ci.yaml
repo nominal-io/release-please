@@ -27,6 +27,25 @@ jobs:
       - run: npm test
         env:
           MOCHA_THROW_DEPRECATION: false
+  bazel-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install Bazel 7.6.1
+        run: |
+          mkdir -p "$RUNNER_TEMP/bazel-bin"
+          curl --fail --location --retry 3 https://releases.bazel.build/7.6.1/release/bazel-7.6.1-linux-x86_64 -o "$RUNNER_TEMP/bazel-bin/bazel"
+          chmod +x "$RUNNER_TEMP/bazel-bin/bazel"
+          echo "$RUNNER_TEMP/bazel-bin" >> "$GITHUB_PATH"
+      - run: npm install
+      - run: npx mocha build/test/util/bazel-query-integration.js
+        env:
+          BAZEL_INTEGRATION_TEST: '1'
+          MOCHA_THROW_DEPRECATION: false
   windows:
     runs-on: windows-latest
     steps:

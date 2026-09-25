@@ -565,6 +565,71 @@ describe('Manifest', () => {
         true
       );
     });
+    for (const defaultQuery of [true, 'deps(//libs/default)']) {
+      it(`inherits bazel-deps-query ${defaultQuery} and respects package overrides`, async () => {
+        const contents = sandbox.stub(github, 'getFileContentsOnBranch');
+        contents.withArgs('release-please-config.json', 'main').resolves(
+          buildGitHubFileRaw(
+            JSON.stringify({
+              'release-type': 'simple',
+              'bazel-deps-query': defaultQuery,
+              packages: {
+                '.': {},
+                'apps/inherited': {},
+                'apps/disabled': {'bazel-deps-query': false},
+                'apps/custom': {'bazel-deps-query': 'deps(//libs/custom)'},
+              },
+            })
+          )
+        );
+        contents
+          .withArgs('.release-please-manifest.json', 'main')
+          .resolves(buildGitHubFileRaw('{}'));
+        const manifest = await Manifest.fromManifest(github, 'main');
+        expect(manifest.repositoryConfig['.'].bazelDepsQuery).to.equal(
+          defaultQuery
+        );
+        expect(
+          manifest.repositoryConfig['apps/inherited'].bazelDepsQuery
+        ).to.equal(defaultQuery);
+        expect(
+          manifest.repositoryConfig['apps/disabled'].bazelDepsQuery
+        ).to.equal(false);
+        expect(
+          manifest.repositoryConfig['apps/custom'].bazelDepsQuery
+        ).to.equal('deps(//libs/custom)');
+
+        mockReleases(sandbox, github, []);
+        mockTags(sandbox, github, []);
+        mockCommits(sandbox, github, [
+          {
+            sha: 'abc123',
+            message: 'fix: shared dependency',
+            files: ['libs/shared/source.txt'],
+          },
+        ]);
+        const bazelQueryModule = await import('../src/util/bazel-query');
+        const query = sandbox
+          .stub(bazelQueryModule, 'runBazelQuery')
+          .returns(['libs/shared']);
+        const pullRequests = await manifest.buildPullRequests();
+        expect(pullRequests).lengthOf(1);
+        const updatedPaths = pullRequests[0].updates.map(update => update.path);
+        expect(updatedPaths).to.include('apps/inherited/CHANGELOG.md');
+        expect(updatedPaths).to.include('apps/custom/CHANGELOG.md');
+        expect(updatedPaths).not.to.include('apps/disabled/CHANGELOG.md');
+        expect(
+          query.getCalls().map(call => call.args.slice(0, 2))
+        ).to.deep.equal([
+          [
+            defaultQuery === true ? 'deps(//apps/inherited)' : defaultQuery,
+            'apps/inherited',
+          ],
+          ['deps(//libs/custom)', 'apps/custom'],
+        ]);
+      });
+    }
+
     it('should read additional paths from manifest', async () => {
       const getFileContentsStub = sandbox.stub(
         github,
@@ -3793,6 +3858,35 @@ describe('Manifest', () => {
           'release-please--branches--main--components--d'
         );
       });
+    });
+
+    it('aborts release generation when dependency resolution fails', async () => {
+      mockReleases(sandbox, github, []);
+      mockTags(sandbox, github, []);
+      mockCommits(sandbox, github, [
+        {
+          sha: 'abc123',
+          message: 'fix: app',
+          files: ['apps/app/source.txt'],
+        },
+      ]);
+      const bazelQueryModule = await import('../src/util/bazel-query');
+      const failure = new Error(
+        'Failed to execute bazel-deps-query: query failed'
+      );
+      sandbox.stub(bazelQueryModule, 'runBazelQuery').throws(failure);
+      const manifest = new Manifest(
+        github,
+        'main',
+        {
+          'apps/app': {releaseType: 'simple', bazelDepsQuery: true},
+        },
+        {}
+      );
+      await assert.rejects(
+        manifest.buildPullRequests(),
+        error => error === failure
+      );
     });
 
     it('should release the root package without running a bazel query', async () => {
