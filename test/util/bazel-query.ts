@@ -14,9 +14,13 @@
 
 import {describe, it} from 'mocha';
 import {expect} from 'chai';
+import {chmodSync, mkdtempSync, rmSync, writeFileSync} from 'fs';
+import {tmpdir} from 'os';
+import {delimiter, join} from 'path';
 import {
   parseBazelQueryOutput,
   resolveBazelQuery,
+  runBazelQuery,
 } from '../../src/util/bazel-query';
 
 describe('parseBazelQueryOutput', () => {
@@ -141,5 +145,27 @@ describe('resolveBazelQuery', () => {
       'apps/my-app'
     );
     expect(expr).to.equal('deps(//apps/my-app)');
+  });
+});
+
+describe('runBazelQuery', () => {
+  it('handles output larger than Node’s default process buffer', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'release-please-bazel-'));
+    const bazel = join(directory, 'bazel');
+    writeFileSync(
+      bazel,
+      `#!${process.execPath}\nprocess.stdout.write('//libs/my-lib:target\\n'.repeat(70000));\n`
+    );
+    chmodSync(bazel, 0o755);
+    const originalPath = process.env.PATH;
+    process.env.PATH = `${directory}${delimiter}${originalPath || ''}`;
+    try {
+      expect(runBazelQuery('deps(//apps/my-app)')).to.deep.equal([
+        'libs/my-lib',
+      ]);
+    } finally {
+      process.env.PATH = originalPath;
+      rmSync(directory, {recursive: true, force: true});
+    }
   });
 });

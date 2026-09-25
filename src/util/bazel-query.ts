@@ -150,6 +150,7 @@ export function runBazelQuery(
     const output = execFileSync('bazel', ['query', queryExpression], {
       encoding: 'utf-8',
       timeout: 120000, // 2 minute timeout
+      maxBuffer: 64 * 1024 * 1024,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
