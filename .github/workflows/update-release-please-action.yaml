@@ -1,0 +1,193 @@
+name: Update release-please-action
+
+# GitHub runs the committed dist/index.js of nominal-io/release-please-action
+# and never installs its dependencies, so a release of this package has no
+# effect until that repo bumps the dependency and rebuilds dist/. This opens
+# (or updates) a draft PR there that does both. publish.yaml calls it after
+# every publish; dispatch it manually to retry or backfill a version.
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Published @nominal-io/release-please version, e.g. 18.3.0
+        required: true
+        type: string
+    secrets:
+      NOMBOT_APP_ID:
+        required: true
+      NOMBOT_PRIVATE_KEY:
+        required: true
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Published @nominal-io/release-please version, e.g. 18.3.0
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: update-release-please-action
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  ACTION_REPO: nominal-io/release-please-action
+  # Owned by this workflow and force-pushed on every run, so a newer release
+  # replaces a pending bump instead of opening a second PR.
+  BRANCH: automation/update-release-please
+
+jobs:
+  # Runs third-party npm code (install scripts, build, tests), so it only gets a
+  # read-only GITHUB_TOKEN. The app token can bypass the ruleset on the action
+  # repo's main branch, so it is minted in pull-request, which never runs npm.
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read # install @nominal-io/release-please from GitHub Packages
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      base-sha: ${{ steps.diff.outputs.base-sha }}
+      changed: ${{ steps.diff.outputs.changed }}
+    steps:
+      - name: Check version
+        id: version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          version="${VERSION#v}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Expected a version like 18.3.0, got '${VERSION}'"
+            exit 1
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: ${{ env.ACTION_REPO }}
+          ref: main
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+          registry-url: https://npm.pkg.github.com
+          scope: '@nominal-io'
+
+      - name: Check for downgrade
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          current=$(node -p "require('./package-lock.json').packages['node_modules/@nominal-io/release-please'].version")
+          if [[ "$(printf '%s\n' "$current" "$VERSION" | sort -V | head -n 1)" != "$current" ]]; then
+            echo "::error::${ACTION_REPO} is on ${current}; refusing to downgrade to ${VERSION}"
+            exit 1
+          fi
+
+      - run: npm ci
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - run: npm install "@nominal-io/release-please@${VERSION}"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+
+      - run: npm run build
+
+      - run: npm test
+
+      - name: Diff
+        id: diff
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          echo "base-sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          git add --all
+          if git diff --cached --quiet; then
+            echo "::notice::${ACTION_REPO} is already on ${VERSION} with an up-to-date dist/, nothing to do"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            git diff --cached --stat
+            git diff --cached --binary > "$RUNNER_TEMP/bump.patch"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.diff.outputs.changed == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bump-patch
+          path: ${{ runner.temp }}/bump.patch
+          if-no-files-found: error
+          retention-days: 1
+
+  pull-request:
+    needs: build
+    if: needs.build.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions: {}
+    steps:
+      - name: Get token
+        id: app-token
+        uses: nominal-io/workflow-application-token-action@86d05551fa394b4b813e0deee328005b45cf5237 # v4.0.1
+        with:
+          application_id: ${{ secrets.NOMBOT_APP_ID }}
+          application_private_key: ${{ secrets.NOMBOT_PRIVATE_KEY }}
+          permissions: "contents:write, pull_requests:write"
+          organization: "nominal-io"
+          revoke_token: true
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: ${{ env.ACTION_REPO }}
+          ref: ${{ needs.build.outputs.base-sha }}
+          token: ${{ steps.app-token.outputs.token }}
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: bump-patch
+          path: ${{ runner.temp }}
+
+      - name: Commit and push
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          git apply --index "$RUNNER_TEMP/bump.patch"
+          unexpected=$(git diff --cached --name-only | grep -vE '^(package\.json|package-lock\.json|dist/.+)$' || true)
+          if [[ -n "$unexpected" ]]; then
+            echo "::error::The bump changed files outside package.json, package-lock.json and dist/:"
+            echo "$unexpected"
+            exit 1
+          fi
+          git -c user.name='nombotv2[bot]' -c user.email='230861728+nombotv2[bot]@users.noreply.github.com' \
+            commit --quiet --message "chore(deps): update @nominal-io/release-please to v${VERSION}"
+          git push --force origin "HEAD:refs/heads/${BRANCH}"
+
+      - name: Open or update PR
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          title="chore(deps): update @nominal-io/release-please to v${VERSION}"
+          repo_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
+          body=$(cat <<EOF
+          Bumps \`@nominal-io/release-please\` to [v${VERSION}](${repo_url}/releases/tag/v${VERSION}) and rebuilds \`dist/\`. GitHub runs the committed \`dist/index.js\` and never installs this action's dependencies, so the release has no effect until this merges.
+
+          Built by [this run](${repo_url}/actions/runs/${GITHUB_RUN_ID}) with \`npm ci\`, \`npm install @nominal-io/release-please@${VERSION}\`, \`npm run build\` and \`npm test\`. That workflow owns the \`${BRANCH}\` branch and force-pushes it when a newer version is released.
+          EOF
+          )
+          number=$(gh api "repos/${ACTION_REPO}/pulls?head=${ACTION_REPO%%/*}:${BRANCH}&state=open" --jq '.[0].number // empty')
+          if [[ -n "$number" ]]; then
+            url=$(gh api --method PATCH "repos/${ACTION_REPO}/pulls/${number}" -f title="$title" -f body="$body" --jq .html_url)
+            echo "::notice::Updated ${url}"
+          else
+            url=$(gh api --method POST "repos/${ACTION_REPO}/pulls" -f title="$title" -f body="$body" \
+              -f head="$BRANCH" -f base=main -F draft=true --jq .html_url)
+            echo "::notice::Opened ${url}"
+          fi
