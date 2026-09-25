@@ -4,6 +4,18 @@
 
 [1]: https://www.npmjs.com/package/release-please?activeTab=versions
 
+## [18.3.0](https://github.com/nominal-io/release-please/compare/v18.2.2...v18.3.0) (2026-09-25)
+
+
+### Features
+
+* add bazel-deps-query config to dynamically resolve additional paths ([#13](https://github.com/nominal-io/release-please/issues/13)) ([f04a10e](https://github.com/nominal-io/release-please/commit/f04a10e0c28084997d43ced2dbba4bfd07a9aece))
+
+
+### Bug Fixes
+
+* handle large Bazel dependency query output ([#24](https://github.com/nominal-io/release-please/issues/24)) ([29a1c70](https://github.com/nominal-io/release-please/commit/29a1c700eda17cadf6535dc122016f7a5d53bad0))
+
 ## [18.2.2](https://github.com/nominal-io/release-please/compare/v18.2.1...v18.2.2) (2026-07-22)
 
 
