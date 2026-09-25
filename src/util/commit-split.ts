@@ -128,7 +128,9 @@ export class CommitSplit {
           Object.entries(this.packagePaths).forEach(
             ([pkgName, additionalPaths]) => {
               if (
-                additionalPaths.some(path => file.indexOf(`${path}/`) === 0)
+                additionalPaths.some(
+                  path => file === path || file.indexOf(`${path}/`) === 0
+                )
               ) {
                 if (dedupe.has(pkgName)) return;
                 dedupe.add(pkgName);

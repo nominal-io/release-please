@@ -245,6 +245,17 @@
             "type": "string"
           }
         },
+        "bazel-deps-query": {
+          "description": "Dynamically resolve additional dependency paths by running a bazel query. Set to true to auto-construct the default query for the package path. Alternatively, provide a query expression (e.g. \"deps(//combined-service)\") or a full \"bazel query ...\" string.",
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
         "version-file": {
           "description": "Path to the specialize version file. Used by `ruby` and `simple` strategies.",
           "type": "string"
@@ -509,6 +520,7 @@
     "initial-version": true,
     "exclude-paths": true,
     "component-no-space": false,
-    "additional-paths": true
+    "additional-paths": true,
+    "bazel-deps-query": true
   }
 }
