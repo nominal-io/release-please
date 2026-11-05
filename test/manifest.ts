@@ -611,7 +611,7 @@ describe('Manifest', () => {
         const bazelQueryModule = await import('../src/util/bazel-query');
         const query = sandbox
           .stub(bazelQueryModule, 'runBazelQuery')
-          .returns(['libs/shared']);
+          .resolves(['libs/shared']);
         const pullRequests = await manifest.buildPullRequests();
         expect(pullRequests).lengthOf(1);
         const updatedPaths = pullRequests[0].updates.map(update => update.path);
@@ -3885,7 +3885,7 @@ describe('Manifest', () => {
       const failure = new Error(
         'Failed to execute bazel-deps-query: query failed'
       );
-      sandbox.stub(bazelQueryModule, 'runBazelQuery').throws(failure);
+      sandbox.stub(bazelQueryModule, 'runBazelQuery').rejects(failure);
       const manifest = new Manifest(
         github,
         'main',
@@ -3898,6 +3898,36 @@ describe('Manifest', () => {
         manifest.buildPullRequests(),
         error => error === failure
       );
+    });
+
+    it('cancels dependency queries when an earlier step fails', async () => {
+      mockReleases(sandbox, github, []);
+      mockTags(sandbox, github, []);
+      const commitFailure = new Error('commit history unavailable');
+      sandbox.stub(github, 'mergeCommitIterator').callsFake(() => {
+        throw commitFailure;
+      });
+      const bazelQueryModule = await import('../src/util/bazel-query');
+      let querySignal: AbortSignal | undefined;
+      sandbox
+        .stub(bazelQueryModule, 'runBazelQuery')
+        .callsFake((_expression, _path, _logger, options) => {
+          querySignal = options?.signal;
+          return new Promise(() => {});
+        });
+      const manifest = new Manifest(
+        github,
+        'main',
+        {
+          'apps/app': {releaseType: 'simple', bazelDepsQuery: true},
+        },
+        {}
+      );
+      await assert.rejects(
+        manifest.buildPullRequests(),
+        error => error === commitFailure
+      );
+      expect(querySignal?.aborted).to.be.true;
     });
 
     it('should release the root package without running a bazel query', async () => {
@@ -3933,7 +3963,7 @@ describe('Manifest', () => {
         const bazelQueryModule = await import('../src/util/bazel-query');
         sandbox
           .stub(bazelQueryModule, 'runBazelQuery')
-          .returns(
+          .resolves(
             bazelQueryModule.parseBazelQueryOutput(
               `//apps/my-app:my-app\n//:${file}`,
               'apps/my-app'
@@ -3986,7 +4016,7 @@ describe('Manifest', () => {
       const bazelQueryModule = await import('../src/util/bazel-query');
       const runBazelQueryStub = sandbox
         .stub(bazelQueryModule, 'runBazelQuery')
-        .returns(['libs/shared-lib', 'libs/other-lib']);
+        .resolves(['libs/shared-lib', 'libs/other-lib']);
 
       const manifest = new Manifest(
         github,
@@ -4052,7 +4082,7 @@ describe('Manifest', () => {
       const bazelQueryModule = await import('../src/util/bazel-query');
       sandbox
         .stub(bazelQueryModule, 'runBazelQuery')
-        .returns(['libs/dynamic-lib']);
+        .resolves(['libs/dynamic-lib']);
 
       const manifest = new Manifest(
         github,

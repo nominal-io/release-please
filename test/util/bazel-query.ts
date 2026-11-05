@@ -14,6 +14,7 @@
 
 import {describe, it, afterEach} from 'mocha';
 import * as childProcess from 'child_process';
+import * as assert from 'assert';
 import * as sinon from 'sinon';
 import {expect} from 'chai';
 import {
@@ -181,22 +182,51 @@ describe('runBazelQuery execution', () => {
   const sandbox = sinon.createSandbox();
   afterEach(() => sandbox.restore());
 
-  it('executes without a shell and returns only relevant dependency paths', () => {
-    const execute = sandbox
-      .stub(childProcess, 'execFileSync')
-      .returns(
-        '//apps/app:app\n//libs/shared:shared\n//libs/shared:source\n@external//:dep\n//:config.json\n'
-      );
-    const logger = {
+  type ExecFileCallback = (
+    error: Error | null,
+    stdout: string,
+    stderr: string
+  ) => void;
+  // Stubs execFile so each call answers with the next outcome in order.
+  function stubExecFile(
+    ...outcomes: Array<{stdout: string} | {error: Error & {stderr?: string}}>
+  ) {
+    let call = 0;
+    return sandbox.stub(childProcess, 'execFile').callsFake(((
+      _file: string,
+      _args: string[],
+      _options: object,
+      callback: ExecFileCallback
+    ) => {
+      const outcome = outcomes[Math.min(call++, outcomes.length - 1)];
+      if ('error' in outcome) {
+        callback(outcome.error, '', outcome.error.stderr ?? '');
+      } else {
+        callback(null, outcome.stdout, '');
+      }
+      return {} as childProcess.ChildProcess;
+    }) as unknown as typeof childProcess.execFile);
+  }
+
+  function stubLogger() {
+    return {
       info: sandbox.stub(),
       error: sandbox.stub(),
       warn: sandbox.stub(),
       debug: sandbox.stub(),
       trace: sandbox.stub(),
     };
-    expect(runBazelQuery('deps(//apps/app)', 'apps/app', logger)).to.deep.equal(
-      ['config.json', 'libs/shared']
-    );
+  }
+
+  it('executes without a shell and returns only relevant dependency paths', async () => {
+    const execute = stubExecFile({
+      stdout:
+        '//apps/app:app\n//libs/shared:shared\n//libs/shared:source\n@external//:dep\n//:config.json\n',
+    });
+    const logger = stubLogger();
+    expect(
+      await runBazelQuery('deps(//apps/app)', 'apps/app', logger)
+    ).to.deep.equal(['config.json', 'libs/shared']);
     sinon.assert.calledOnceWithMatch(
       execute,
       'bazel',
@@ -206,67 +236,69 @@ describe('runBazelQuery execution', () => {
           args[0] === 'query' &&
           args[1].includes('deps(//apps/app)')
       ),
-      {
-        encoding: 'utf-8',
-        timeout: 120000,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      }
+      {encoding: 'utf-8', timeout: 120000}
     );
     expect(execute.firstCall.args[2]).not.to.have.property('shell', true);
     sinon.assert.calledWithMatch(logger.info, 'additional paths');
   });
 
-  it('handles output larger than the default process buffer', () => {
-    const execute = childProcess.execFileSync;
-    sandbox
-      .stub(childProcess, 'execFileSync')
-      .callsFake((file, args, options) => {
-        expect(file).to.equal('bazel');
-        expect(args).to.deep.equal([
-          'query',
-          "filter('^//', deps(//apps/my-app))",
-        ]);
-        // Use a real child process without requiring a platform-specific executable.
-        return execute(
-          process.execPath,
-          [
-            '-e',
-            "process.stdout.write('//libs/my-lib:target\\n'.repeat(70000));",
-          ],
-          options
-        );
-      });
-    expect(runBazelQuery('deps(//apps/my-app)')).to.deep.equal(['libs/my-lib']);
+  it('handles output larger than the default process buffer', async () => {
+    const execute = childProcess.execFile;
+    sandbox.stub(childProcess, 'execFile').callsFake(((
+      file: string,
+      args: string[],
+      options: object,
+      callback: ExecFileCallback
+    ) => {
+      expect(file).to.equal('bazel');
+      expect(args).to.deep.equal([
+        'query',
+        "filter('^//', deps(//apps/my-app))",
+      ]);
+      // Use a real child process without requiring a platform-specific executable.
+      return execute(
+        process.execPath,
+        [
+          '-e',
+          "process.stdout.write('//libs/my-lib:target\\n'.repeat(70000));",
+        ],
+        options,
+        callback
+      );
+    }) as unknown as typeof childProcess.execFile);
+    expect(await runBazelQuery('deps(//apps/my-app)')).to.deep.equal([
+      'libs/my-lib',
+    ]);
   });
 
-  it('returns no paths for an empty query result without a logger', () => {
-    sandbox.stub(childProcess, 'execFileSync').returns('');
-    expect(runBazelQuery('deps(//apps/app)')).to.deep.equal([]);
+  it('returns no paths for an empty query result without a logger', async () => {
+    stubExecFile({stdout: ''});
+    expect(await runBazelQuery('deps(//apps/app)')).to.deep.equal([]);
   });
 
   for (const failure of [
-    {name: 'missing Bazel', message: 'spawnSync bazel ENOENT', code: 'ENOENT'},
-    {name: 'timeout', message: 'spawnSync bazel ETIMEDOUT', code: 'ETIMEDOUT'},
+    {name: 'missing Bazel', message: 'spawn bazel ENOENT', code: 'ENOENT'},
+    {
+      name: 'timeout',
+      message: 'Command failed: bazel query',
+      killed: true,
+      signal: 'SIGTERM',
+    },
     {
       name: 'nonzero exit',
       message: 'Command failed: bazel query',
       stderr: 'ERROR: no such target',
     },
   ]) {
-    it(`propagates ${failure.name} with query context and logs diagnostics`, () => {
+    it(`propagates ${failure.name} with query context and logs diagnostics`, async () => {
       const error = Object.assign(new Error(failure.message), failure);
-      sandbox.stub(childProcess, 'execFileSync').throws(error);
-      const logger = {
-        info: sandbox.stub(),
-        error: sandbox.stub(),
-        warn: sandbox.stub(),
-        debug: sandbox.stub(),
-        trace: sandbox.stub(),
-      };
-      expect(() =>
-        runBazelQuery('deps(//apps/app)', undefined, logger)
-      ).to.throw(
-        `Failed to execute bazel-deps-query "deps(//apps/app)": ${failure.message}`
+      stubExecFile({error});
+      const logger = stubLogger();
+      await assert.rejects(
+        runBazelQuery('deps(//apps/app)', undefined, logger),
+        {
+          message: `Failed to execute bazel-deps-query "deps(//apps/app)": ${failure.message}`,
+        }
       );
       sinon.assert.calledWithMatch(logger.error, failure.message);
       if (failure.stderr) {
@@ -289,56 +321,74 @@ describe('runBazelQuery execution', () => {
         'GET returned 504 Gateway Time-out',
     });
 
-  it('retries a query that failed to fetch an external repository', () => {
-    const execute = sandbox
-      .stub(childProcess, 'execFileSync')
-      .onFirstCall()
-      .throws(fetchFailure())
-      .onSecondCall()
-      .returns('//libs/shared:shared\n');
-    const logger = {
-      info: sandbox.stub(),
-      error: sandbox.stub(),
-      warn: sandbox.stub(),
-      debug: sandbox.stub(),
-      trace: sandbox.stub(),
-    };
+  it('retries a query that failed to fetch an external repository', async () => {
+    const execute = stubExecFile(
+      {error: fetchFailure()},
+      {stdout: '//libs/shared:shared\n'}
+    );
+    const logger = stubLogger();
     expect(
-      runBazelQuery('deps(//apps/app)', 'apps/app', logger, {retryDelayMs: 0})
+      await runBazelQuery('deps(//apps/app)', 'apps/app', logger, {
+        retryDelayMs: 0,
+      })
     ).to.deep.equal(['libs/shared']);
     sinon.assert.calledTwice(execute);
     sinon.assert.calledWithMatch(logger.warn, 'attempt 2 of 3');
   });
 
-  it('gives up after the configured number of fetch failures', () => {
-    const execute = sandbox
-      .stub(childProcess, 'execFileSync')
-      .throws(fetchFailure());
-    expect(() =>
+  it('gives up after the configured number of fetch failures', async () => {
+    const execute = stubExecFile({error: fetchFailure()});
+    await assert.rejects(
       runBazelQuery('deps(//apps/app)', undefined, undefined, {
         attempts: 3,
         retryDelayMs: 0,
-      })
-    ).to.throw('Failed to execute bazel-deps-query "deps(//apps/app)"');
+      }),
+      /Failed to execute bazel-deps-query "deps\(\/\/apps\/app\)"/
+    );
     sinon.assert.calledThrice(execute);
   });
 
-  it('does not retry failures other than repository fetches', () => {
-    const execute = sandbox.stub(childProcess, 'execFileSync').throws(
-      Object.assign(new Error('Command failed: bazel query'), {
+  it('does not retry failures other than repository fetches', async () => {
+    const execute = stubExecFile({
+      error: Object.assign(new Error('Command failed: bazel query'), {
         stderr: 'ERROR: no such target',
-      })
+      }),
+    });
+    await assert.rejects(
+      runBazelQuery('deps(//apps/app)', undefined, undefined, {
+        retryDelayMs: 0,
+      }),
+      /Failed to execute bazel-deps-query/
     );
-    expect(() =>
-      runBazelQuery('deps(//apps/app)', undefined, undefined, {retryDelayMs: 0})
-    ).to.throw('Failed to execute bazel-deps-query');
     sinon.assert.calledOnce(execute);
   });
 
-  it('propagates errors without requiring a logger', () => {
-    sandbox
-      .stub(childProcess, 'execFileSync')
-      .throws(new Error('query failed'));
-    expect(() => runBazelQuery('deps(//apps/app)')).to.throw('query failed');
+  it('passes the abort signal to bazel and does not retry once aborted', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const abortError = Object.assign(new Error('The operation was aborted'), {
+      name: 'AbortError',
+      stderr: 'Error downloading [https://example.com/repo.tar.gz]',
+    });
+    const execute = stubExecFile({error: abortError});
+    const logger = stubLogger();
+    await assert.rejects(
+      runBazelQuery('deps(//apps/app)', undefined, logger, {
+        retryDelayMs: 0,
+        signal: controller.signal,
+      }),
+      error => error === abortError
+    );
+    sinon.assert.calledOnce(execute);
+    expect(execute.firstCall.args[2]).to.have.property(
+      'signal',
+      controller.signal
+    );
+    sinon.assert.notCalled(logger.error);
+  });
+
+  it('propagates errors without requiring a logger', async () => {
+    stubExecFile({error: new Error('query failed')});
+    await assert.rejects(runBazelQuery('deps(//apps/app)'), /query failed/);
   });
 });

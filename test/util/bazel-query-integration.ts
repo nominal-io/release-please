@@ -14,6 +14,7 @@
 
 import {describe, it, before, after} from 'mocha';
 import {expect} from 'chai';
+import * as assert from 'assert';
 import {mkdtempSync, mkdirSync, writeFileSync, rmSync} from 'fs';
 import {tmpdir} from 'os';
 import {join} from 'path';
@@ -68,8 +69,8 @@ integration('Bazel workspace integration', function () {
     rmSync(workspace, {recursive: true, force: true});
   });
 
-  it('resolves real labels and selects only commits affecting dependencies', () => {
-    const paths = runBazelQuery(
+  it('resolves real labels and selects only commits affecting dependencies', async () => {
+    const paths = await runBazelQuery(
       resolveBazelQuery(true, 'apps/app'),
       'apps/app'
     );
@@ -91,9 +92,10 @@ integration('Bazel workspace integration', function () {
     expect(split['apps/app']).to.deep.equal(commits.slice(0, 3));
   });
 
-  it('propagates a real Bazel query error', () => {
-    expect(() => runBazelQuery('deps(//apps/app:missing)')).to.throw(
-      'Failed to execute bazel-deps-query "deps(//apps/app:missing)"'
-    );
+  it('propagates a real Bazel query error', async () => {
+    await assert.rejects(runBazelQuery('deps(//apps/app:missing)'), {
+      message:
+        /^Failed to execute bazel-deps-query "deps\(\/\/apps\/app:missing\)"/,
+    });
   });
 });

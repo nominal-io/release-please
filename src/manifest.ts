@@ -553,6 +553,24 @@ export class Manifest {
    * @returns {ReleasePullRequest[]} The candidate pull requests to open or update.
    */
   async buildPullRequests(): Promise<ReleasePullRequest[]> {
+    // Bazel dependency queries only read the local checkout, so run them while
+    // the GitHub API calls are in flight. A rejection surfaces where the paths
+    // are awaited; the no-op catch only stops Node reporting it as unhandled
+    // when an earlier step throws first.
+    const abort = new AbortController();
+    const additionalPaths = this.resolveAdditionalPaths(abort.signal);
+    additionalPaths.catch(() => {});
+    try {
+      return await this.buildCandidatePullRequests(additionalPaths);
+    } finally {
+      // Stop queries still running when building fails before it needs them.
+      abort.abort();
+    }
+  }
+
+  private async buildCandidatePullRequests(
+    additionalPathsPromise: Promise<Record<string, string[]>>
+  ): Promise<ReleasePullRequest[]> {
     this.logger.info('Building pull requests');
     const pathsByComponent = await this.getPathsByComponent();
     const strategiesByPath = await this.getStrategiesByPath();
@@ -700,25 +718,7 @@ export class Manifest {
       );
     }
 
-    // resolve bazel-deps-query for each package and merge with additionalPaths
-    const resolvedAdditionalPaths: Record<string, string[]> = {};
-    for (const [path, config] of Object.entries(this.repositoryConfig)) {
-      const staticPaths = config.additionalPaths || [];
-      let bazelPaths: string[] = [];
-      // Root packages already receive all commits and need no dependency query.
-      if (config.bazelDepsQuery && path !== ROOT_PROJECT_PATH) {
-        const queryExpression = resolveBazelQuery(config.bazelDepsQuery, path);
-        bazelPaths = runBazelQuery(queryExpression, path, this.logger);
-        this.logger.info(
-          `bazel-deps-query resolved paths for ${path}: ${JSON.stringify(
-            bazelPaths
-          )}`
-        );
-      }
-      // merge and deduplicate
-      const allPaths = [...new Set([...staticPaths, ...bazelPaths])];
-      resolvedAdditionalPaths[path] = allPaths;
-    }
+    const resolvedAdditionalPaths = await additionalPathsPromise;
 
     // split commits by path
     this.logger.info(`Splitting ${commits.length} commits by path`);
@@ -888,6 +888,37 @@ export class Manifest {
     return newReleasePullRequests.map(
       pullRequestWithConfig => pullRequestWithConfig.pullRequest
     );
+  }
+
+  /**
+   * Resolve each package's additional paths: its static `additionalPaths`
+   * merged with the result of its `bazel-deps-query`, if any.
+   */
+  private async resolveAdditionalPaths(
+    signal?: AbortSignal
+  ): Promise<Record<string, string[]>> {
+    const resolvedAdditionalPaths: Record<string, string[]> = {};
+    for (const [path, config] of Object.entries(this.repositoryConfig)) {
+      signal?.throwIfAborted();
+      const staticPaths = config.additionalPaths || [];
+      let bazelPaths: string[] = [];
+      // Root packages already receive all commits and need no dependency query.
+      if (config.bazelDepsQuery && path !== ROOT_PROJECT_PATH) {
+        const queryExpression = resolveBazelQuery(config.bazelDepsQuery, path);
+        bazelPaths = await runBazelQuery(queryExpression, path, this.logger, {
+          signal,
+        });
+        this.logger.info(
+          `bazel-deps-query resolved paths for ${path}: ${JSON.stringify(
+            bazelPaths
+          )}`
+        );
+      }
+      // merge and deduplicate
+      const allPaths = [...new Set([...staticPaths, ...bazelPaths])];
+      resolvedAdditionalPaths[path] = allPaths;
+    }
+    return resolvedAdditionalPaths;
   }
 
   private async backfillReleasesFromTags(
