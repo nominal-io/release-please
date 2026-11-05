@@ -280,6 +280,61 @@ describe('runBazelQuery execution', () => {
     });
   }
 
+  const fetchFailure = () =>
+    Object.assign(new Error('Command failed: bazel query'), {
+      stderr:
+        "ERROR: An error occurred during the fetch of repository 'rules_android+':\n" +
+        'Error in download_and_extract: java.io.IOException: Error downloading ' +
+        '[https://github.com/bazelbuild/rules_android/releases/download/v0.7.1/rules_android-v0.7.1.tar.gz]: ' +
+        'GET returned 504 Gateway Time-out',
+    });
+
+  it('retries a query that failed to fetch an external repository', () => {
+    const execute = sandbox
+      .stub(childProcess, 'execFileSync')
+      .onFirstCall()
+      .throws(fetchFailure())
+      .onSecondCall()
+      .returns('//libs/shared:shared\n');
+    const logger = {
+      info: sandbox.stub(),
+      error: sandbox.stub(),
+      warn: sandbox.stub(),
+      debug: sandbox.stub(),
+      trace: sandbox.stub(),
+    };
+    expect(
+      runBazelQuery('deps(//apps/app)', 'apps/app', logger, {retryDelayMs: 0})
+    ).to.deep.equal(['libs/shared']);
+    sinon.assert.calledTwice(execute);
+    sinon.assert.calledWithMatch(logger.warn, 'attempt 2 of 3');
+  });
+
+  it('gives up after the configured number of fetch failures', () => {
+    const execute = sandbox
+      .stub(childProcess, 'execFileSync')
+      .throws(fetchFailure());
+    expect(() =>
+      runBazelQuery('deps(//apps/app)', undefined, undefined, {
+        attempts: 3,
+        retryDelayMs: 0,
+      })
+    ).to.throw('Failed to execute bazel-deps-query "deps(//apps/app)"');
+    sinon.assert.calledThrice(execute);
+  });
+
+  it('does not retry failures other than repository fetches', () => {
+    const execute = sandbox.stub(childProcess, 'execFileSync').throws(
+      Object.assign(new Error('Command failed: bazel query'), {
+        stderr: 'ERROR: no such target',
+      })
+    );
+    expect(() =>
+      runBazelQuery('deps(//apps/app)', undefined, undefined, {retryDelayMs: 0})
+    ).to.throw('Failed to execute bazel-deps-query');
+    sinon.assert.calledOnce(execute);
+  });
+
   it('propagates errors without requiring a logger', () => {
     sandbox
       .stub(childProcess, 'execFileSync')
