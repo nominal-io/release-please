@@ -409,6 +409,9 @@ export function mockTags(
       yield tag;
     }
   }
+  sandbox
+    .stub(github, 'getTag')
+    .callsFake(async (name: string) => tags.find(tag => tag.name === name));
   return sandbox.stub(github, 'tagIterator').returns(fakeGenerator());
 }
 

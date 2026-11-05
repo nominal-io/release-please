@@ -636,6 +636,41 @@ describe('GitHub', () => {
     });
   });
 
+  describe('getTag', () => {
+    it('returns the commit a lightweight tag points at', async () => {
+      req
+        .get('/repos/fake/fake/git/ref/tags%2Fapps%2Ffoo%401.2.3')
+        .reply(200, {object: {sha: 'abc123', type: 'commit'}});
+      const tag = await github.getTag('apps/foo@1.2.3');
+      expect(tag).to.eql({name: 'apps/foo@1.2.3', sha: 'abc123'});
+      req.done();
+    });
+
+    it('peels an annotated tag to its commit', async () => {
+      req
+        .get('/repos/fake/fake/git/ref/tags%2Fv1.2.3')
+        .reply(200, {object: {sha: 'tagobject', type: 'tag'}})
+        .get('/repos/fake/fake/git/tags/tagobject')
+        .reply(200, {object: {sha: 'abc123', type: 'commit'}});
+      const tag = await github.getTag('v1.2.3');
+      expect(tag).to.eql({name: 'v1.2.3', sha: 'abc123'});
+      req.done();
+    });
+
+    it('returns undefined for a missing tag', async () => {
+      req.get('/repos/fake/fake/git/ref/tags%2Fv9.9.9').reply(404);
+      const tag = await github.getTag('v9.9.9');
+      expect(tag).to.be.undefined;
+      req.done();
+    });
+
+    it('throws on other API errors', async () => {
+      req.get('/repos/fake/fake/git/ref/tags%2Fv1.2.3').reply(403);
+      await assert.rejects(github.getTag('v1.2.3'), GitHubAPIError);
+      req.done();
+    });
+  });
+
   describe('releaseIterator', () => {
     it('iterates through releases', async () => {
       const graphql = JSON.parse(

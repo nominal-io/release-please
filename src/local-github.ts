@@ -721,6 +721,28 @@ export class LocalGitHub implements Scm {
   }
 
   /**
+   * Look up a single tag by exact name.
+   *
+   * @param {string} name The tag name, without the `refs/tags/` prefix
+   * @returns {ScmTag | undefined} The tag and the commit SHA it points at,
+   *   or undefined if there is no such tag
+   */
+  async getTag(name: string): Promise<ScmTag | undefined> {
+    try {
+      const {stdout} = await execFile(
+        'git',
+        ['rev-parse', '--verify', '--quiet', `refs/tags/${name}^{commit}`],
+        {cwd: this.cloneDir}
+      );
+      const sha = stdout.trim();
+      return sha ? {name, sha} : undefined;
+    } catch {
+      // `rev-parse --verify --quiet` exits non-zero when the tag does not exist
+      return undefined;
+    }
+  }
+
+  /**
    * Open a pull request
    *
    * @param {PullRequest} pullRequest Pull request data to update
