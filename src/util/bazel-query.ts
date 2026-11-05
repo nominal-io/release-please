@@ -132,33 +132,80 @@ export function resolveBazelQuery(
   return trimmed;
 }
 
+// Matches stderr from a failed external repository download, such as a 5xx
+// from GitHub release assets. These are transient, and a retry on the same
+// Bazel server only re-fetches the repositories that failed.
+const REPOSITORY_FETCH_FAILURE =
+  /Error downloading|error occurred during the fetch of repository/;
+
+export interface BazelQueryOptions {
+  /** Total attempts for a query that fails to fetch an external repository. */
+  attempts?: number;
+  /** Delay before each retry. */
+  retryDelayMs?: number;
+}
+
+function sleepSync(ms: number) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 /**
  * Execute a bazel query expression and return the parsed local package paths.
  *
  * This uses `execFileSync` (no shell) to reduce the risk of command injection.
+ * A query that fails while fetching an external repository is retried; any
+ * other failure is thrown immediately.
  *
  * @param queryExpression The query expression to execute (e.g., "deps(//combined-service)")
  * @param excludePath Optional path to exclude from results
  * @param logger Optional logger instance
+ * @param options Optional retry settings
  * @returns Array of unique local package paths
  */
 export function runBazelQuery(
   queryExpression: string,
   excludePath?: string,
-  logger?: Logger
+  logger?: Logger,
+  {attempts = 3, retryDelayMs = 15000}: BazelQueryOptions = {}
 ): string[] {
   const localQueryExpression = `filter('^//', ${queryExpression})`;
   logger?.info(
     `Running bazel deps query: bazel query '${localQueryExpression}'`
   );
 
-  try {
-    const output = execFileSync('bazel', ['query', localQueryExpression], {
-      encoding: 'utf-8',
-      timeout: 120000, // 2 minute timeout
-      maxBuffer: 64 * 1024 * 1024,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+  for (let attempt = 1; ; attempt++) {
+    let output: string;
+    try {
+      output = execFileSync('bazel', ['query', localQueryExpression], {
+        encoding: 'utf-8',
+        timeout: 120000, // 2 minute timeout
+        maxBuffer: 64 * 1024 * 1024,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+    } catch (err) {
+      const error = err as Error & {stderr?: string};
+      logger?.error(
+        `Failed to run bazel deps query "${queryExpression}": ${error.message}`
+      );
+      if (error.stderr) {
+        logger?.error(`stderr: ${error.stderr}`);
+      }
+      if (
+        attempt < attempts &&
+        REPOSITORY_FETCH_FAILURE.test(error.stderr ?? '')
+      ) {
+        logger?.warn(
+          `Repository fetch failed; retrying bazel deps query (attempt ${
+            attempt + 1
+          } of ${attempts}) in ${retryDelayMs}ms`
+        );
+        sleepSync(retryDelayMs);
+        continue;
+      }
+      throw new Error(
+        `Failed to execute bazel-deps-query "${queryExpression}": ${error.message}`
+      );
+    }
 
     const paths = parseBazelQueryOutput(output, excludePath);
     logger?.info(
@@ -167,16 +214,5 @@ export function runBazelQuery(
       } additional paths: ${JSON.stringify(paths)}`
     );
     return paths;
-  } catch (err) {
-    const error = err as Error & {stderr?: string};
-    logger?.error(
-      `Failed to run bazel deps query "${queryExpression}": ${error.message}`
-    );
-    if (error.stderr) {
-      logger?.error(`stderr: ${error.stderr}`);
-    }
-    throw new Error(
-      `Failed to execute bazel-deps-query "${queryExpression}": ${error.message}`
-    );
   }
 }
