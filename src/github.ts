@@ -557,6 +557,43 @@ export class GitHub implements Scm {
   }
 
   /**
+   * Look up a single tag by exact name.
+   *
+   * @param {string} name The tag name, without the `refs/tags/` prefix
+   * @returns {ScmTag | undefined} The tag and the commit SHA it points at,
+   *   or undefined if there is no such tag
+   * @throws {GitHubAPIError} on an API error
+   */
+  getTag = wrapAsync(async (name: string): Promise<ScmTag | undefined> => {
+    let sha: string;
+    let type: string;
+    try {
+      const {data} = await this.octokit.git.getRef({
+        owner: this.repository.owner,
+        repo: this.repository.repo,
+        ref: `tags/${name}`,
+      });
+      ({sha, type} = data.object);
+    } catch (e) {
+      if (e instanceof RequestError && e.status === 404) {
+        return undefined;
+      }
+      throw e;
+    }
+    // An annotated tag points at a tag object; peel it to the commit, which is
+    // what the list-tags API reports.
+    while (type === 'tag') {
+      const {data} = await this.octokit.git.getTag({
+        owner: this.repository.owner,
+        repo: this.repository.repo,
+        tag_sha: sha,
+      });
+      ({sha, type} = data.object);
+    }
+    return {name, sha};
+  });
+
+  /**
    * Fetch the contents of a file from the configured branch
    *
    * @param {string} path The path to the file in the repository

@@ -164,4 +164,18 @@ describe('LocalGitHub', () => {
       expect(tags[0].sha).to.not.be.undefined;
     });
   });
+
+  describe('getTag', () => {
+    it('finds a tag by name with the same commit as tagIterator', async () => {
+      const generator = localGitHub.tagIterator({maxResults: 1});
+      const {value: expected} = await generator.next();
+      const tag = await localGitHub.getTag(expected!.name);
+      expect(tag).to.eql(expected);
+    });
+
+    it('returns undefined for a missing tag', async () => {
+      const tag = await localGitHub.getTag('no-such-tag-v0.0.0');
+      expect(tag).to.be.undefined;
+    });
+  });
 });
