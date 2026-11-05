@@ -4,6 +4,19 @@
 
 [1]: https://www.npmjs.com/package/release-please?activeTab=versions
 
+## [18.3.1](https://github.com/nominal-io/release-please/compare/v18.3.0...v18.3.1) (2026-11-05)
+
+
+### Bug Fixes
+
+* **bazel-query:** retry a deps query that fails to fetch a repository ([#27](https://github.com/nominal-io/release-please/issues/27)) ([3368cc5](https://github.com/nominal-io/release-please/commit/3368cc5b09c99ee21c8899a14597251804187df5))
+
+
+### Performance Improvements
+
+* **manifest:** look up missing release tags by name ([#26](https://github.com/nominal-io/release-please/issues/26)) ([7436a74](https://github.com/nominal-io/release-please/commit/7436a74add01a90849643191c7da0e1f5975013d))
+* **manifest:** run bazel-deps-query alongside the GitHub API calls ([#28](https://github.com/nominal-io/release-please/issues/28)) ([0bd9511](https://github.com/nominal-io/release-please/commit/0bd95119574256a79e8612bc28ff62d12b0549ea))
+
 ## [18.3.0](https://github.com/nominal-io/release-please/compare/v18.2.2...v18.3.0) (2026-09-25)
 
 
