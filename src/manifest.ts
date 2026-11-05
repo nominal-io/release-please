@@ -13,7 +13,7 @@
 // limitations under the License.
 
 import {ChangelogSection} from './changelog-notes';
-import {Scm, ScmRelease, ScmTag} from './scm';
+import {Scm, ScmRelease} from './scm';
 import {Version, VersionsMap} from './version';
 import {Commit, parseConventionalCommits} from './commit';
 import {PullRequest} from './pull-request';
@@ -926,7 +926,6 @@ export class Manifest {
     strategiesByPath: Record<string, Strategy>
   ): Promise<Record<string, Release>> {
     const releasesByPath: Record<string, Release> = {};
-    const allTags = await this.getAllTags();
     for (const path of missingPaths) {
       const expectedVersion = this.releasedVersions[path];
       if (!expectedVersion) {
@@ -941,7 +940,7 @@ export class Manifest {
         this.repositoryConfig[path].includeVInTag
       );
       this.logger.debug(`looking for tagName: ${expectedTag.toString()}`);
-      const foundTag = allTags[expectedTag.toString()];
+      const foundTag = await this.github.getTag(expectedTag.toString());
       if (foundTag) {
         this.logger.debug(`found: ${foundTag.name} ${foundTag.sha}`);
         releasesByPath[path] = {
@@ -965,7 +964,7 @@ export class Manifest {
             this.repositoryConfig[ROOT_PROJECT_PATH].tagSeparator,
             this.repositoryConfig[ROOT_PROJECT_PATH].includeVInTag
           );
-          const foundTag = allTags[rootTag.toString()];
+          const foundTag = await this.github.getTag(rootTag.toString());
           if (foundTag) {
             this.logger.debug(
               `found rootTag: ${foundTag.name} ${foundTag.sha}`
@@ -981,14 +980,6 @@ export class Manifest {
       }
     }
     return releasesByPath;
-  }
-
-  private async getAllTags(): Promise<Record<string, ScmTag>> {
-    const allTags: Record<string, ScmTag> = {};
-    for await (const tag of this.github.tagIterator()) {
-      allTags[tag.name] = tag;
-    }
-    return allTags;
   }
 
   /**
