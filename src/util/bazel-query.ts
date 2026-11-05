@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {execFileSync} from 'child_process';
+import {execFile} from 'child_process';
 import {Logger} from './logger';
 
 /**
@@ -143,31 +143,55 @@ export interface BazelQueryOptions {
   attempts?: number;
   /** Delay before each retry. */
   retryDelayMs?: number;
+  /** Kills a running query and stops retrying. */
+  signal?: AbortSignal;
 }
 
-function sleepSync(ms: number) {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+function execBazelQuery(
+  expression: string,
+  signal?: AbortSignal
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      'bazel',
+      ['query', expression],
+      {
+        encoding: 'utf-8',
+        timeout: 120000, // 2 minute timeout
+        maxBuffer: 64 * 1024 * 1024,
+        signal,
+      },
+      (error, stdout, stderr) => {
+        if (error) {
+          reject(Object.assign(error, {stderr}));
+        } else {
+          resolve(stdout);
+        }
+      }
+    );
+  });
 }
 
 /**
  * Execute a bazel query expression and return the parsed local package paths.
  *
- * This uses `execFileSync` (no shell) to reduce the risk of command injection.
+ * This uses `execFile` (no shell) to reduce the risk of command injection. It
+ * runs asynchronously so callers can overlap it with GitHub API calls.
  * A query that fails while fetching an external repository is retried; any
  * other failure is thrown immediately.
  *
  * @param queryExpression The query expression to execute (e.g., "deps(//combined-service)")
  * @param excludePath Optional path to exclude from results
  * @param logger Optional logger instance
- * @param options Optional retry settings
+ * @param options Optional retry and cancellation settings
  * @returns Array of unique local package paths
  */
-export function runBazelQuery(
+export async function runBazelQuery(
   queryExpression: string,
   excludePath?: string,
   logger?: Logger,
-  {attempts = 3, retryDelayMs = 15000}: BazelQueryOptions = {}
-): string[] {
+  {attempts = 3, retryDelayMs = 15000, signal}: BazelQueryOptions = {}
+): Promise<string[]> {
   const localQueryExpression = `filter('^//', ${queryExpression})`;
   logger?.info(
     `Running bazel deps query: bazel query '${localQueryExpression}'`
@@ -176,13 +200,11 @@ export function runBazelQuery(
   for (let attempt = 1; ; attempt++) {
     let output: string;
     try {
-      output = execFileSync('bazel', ['query', localQueryExpression], {
-        encoding: 'utf-8',
-        timeout: 120000, // 2 minute timeout
-        maxBuffer: 64 * 1024 * 1024,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
+      output = await execBazelQuery(localQueryExpression, signal);
     } catch (err) {
+      if (signal?.aborted) {
+        throw err;
+      }
       const error = err as Error & {stderr?: string};
       logger?.error(
         `Failed to run bazel deps query "${queryExpression}": ${error.message}`
@@ -199,7 +221,7 @@ export function runBazelQuery(
             attempt + 1
           } of ${attempts}) in ${retryDelayMs}ms`
         );
-        sleepSync(retryDelayMs);
+        await new Promise(resolve => setTimeout(resolve, retryDelayMs));
         continue;
       }
       throw new Error(
